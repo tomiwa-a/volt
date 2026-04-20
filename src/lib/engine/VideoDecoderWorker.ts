@@ -9,12 +9,13 @@ importScripts('https://unpkg.com/mp4box@0.5.2/dist/mp4box.all.js');
 let mp4boxFile: any;
 let videoTrack: any;
 let decoder: VideoDecoder | null = null;
-let currentFile: File | null = null;
 
 let samples: any[] = [];
 let activeLoadId = 0;
 let pendingSeekMs: Milliseconds | null = null;
-let targetTimeMs: Milliseconds | null = null;
+
+let seekFrameTotal = 0;
+let seekFrameDecoded = 0;
 
 ctx.onmessage = async (e) => {
   const { type, payload } = e.data;
@@ -35,7 +36,6 @@ ctx.onmessage = async (e) => {
 };
 
 async function initFile(file: File, loadId: number) {
-  currentFile = file;
   samples = [];
   pendingSeekMs = null;
 
@@ -49,19 +49,25 @@ async function initFile(file: File, loadId: number) {
 
   mp4boxFile.onReady = (info: any) => {
     videoTrack = info.videoTracks[0];
+    if (!videoTrack) {
+      console.error('[DecoderWorker] No video track found in file.');
+      return;
+    }
     ctx.postMessage({ type: 'READY', payload: { track: videoTrack } });
-
-    mp4boxFile.setExtractionOptions(videoTrack.id, null, { strategy: 'all' });
+    mp4boxFile.setExtractionOptions(videoTrack.id, null, { nbSamples: 1000 });
     mp4boxFile.start();
   };
 
-  mp4boxFile.onSamples = (id: number, user: any, fetchedSamples: any[]) => {
-    samples = fetchedSamples;
+  mp4boxFile.onSamples = (_id: number, _user: any, fetchedSamples: any[]) => {
+    for (let i = 0; i < fetchedSamples.length; i++) {
+      samples.push(fetchedSamples[i]);
+    }
     ctx.postMessage({ type: 'INDEXED', payload: { count: samples.length } });
 
     if (pendingSeekMs !== null) {
-      seekTo(pendingSeekMs);
+      const t = pendingSeekMs;
       pendingSeekMs = null;
+      queueMicrotask(() => seekTo(t));
     }
   };
 
@@ -103,7 +109,6 @@ async function seekTo(timeMs: Milliseconds) {
 
   const timescale = videoTrack.timescale;
   const targetCts = (timeMs / 1000) * timescale;
-  targetTimeMs = timeMs;
 
   let targetIndex = 0;
   for (let i = 0; i < samples.length; i++) {
@@ -116,19 +121,21 @@ async function seekTo(timeMs: Milliseconds) {
     keyIndex--;
   }
 
-  // Always reset and reconfigure the decoder before a seek chain to avoid
-  // the 'key frame required after configure() or flush()' error.
   if (decoder) {
     decoder.close();
     decoder = null;
   }
 
+  seekFrameTotal = targetIndex - keyIndex + 1;
+  seekFrameDecoded = 0;
+
   decoder = new VideoDecoder({
     output: (frame) => {
-      const frameMs = Math.round(frame.timestamp / 1000) as Milliseconds;
-      if (targetTimeMs !== null && Math.abs(frameMs - targetTimeMs) < (1000 / (videoTrack?.timescale ?? 30))) {
+      seekFrameDecoded++;
+
+      if (seekFrameDecoded === seekFrameTotal) {
         createImageBitmap(frame).then(bitmap => {
-          ctx.postMessage({ type: 'FRAME', payload: { bitmap, timeMs: frameMs } }, [bitmap]);
+          ctx.postMessage({ type: 'FRAME', payload: { bitmap, timeMs } }, [bitmap]);
           frame.close();
         });
       } else {

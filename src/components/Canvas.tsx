@@ -1,10 +1,12 @@
+'use client';
+
 import { useRef, useEffect, useState } from 'react';
 import { useProjectStore } from '@/store/useProjectStore';
 import { useEditorStore } from '@/store/useEditorStore';
 import { engine } from '@/lib/engine/EngineService';
 import { mediaService } from '@/lib/media/MediaService';
 import { formatTimecode } from '@/lib/utils/timecode';
-import { AlignCenter, Type as TextIcon, RotateCw, Lock, ShieldAlert } from 'lucide-react';
+import { AlignCenter, Type as TextIcon, RotateCw, Lock, ShieldAlert, Film, Video } from 'lucide-react';
 
 interface CanvasProps {
   projectName: string;
@@ -15,8 +17,10 @@ export default function Canvas({ projectName }: CanvasProps) {
   const { currentTime, duration } = useEditorStore();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [needsPermission, setNeedsPermission] = useState(false);
+  const [hasFrame, setHasFrame] = useState(false);
 
   const aspectRatio = Number(resolution.width) / Number(resolution.height);
+  const hasVideoAsset = assets.some(a => a.type === 'video');
 
   const loadMediaToEngine = async () => {
     const firstVideo = assets.find(a => a.type === 'video');
@@ -42,11 +46,8 @@ export default function Canvas({ projectName }: CanvasProps) {
   const handleReconnect = async () => {
     const firstVideo = assets.find(a => a.type === 'video');
     if (!firstVideo?.handle) return;
-
     const granted = await mediaService.verifyPermission(firstVideo.handle, true);
-    if (granted) {
-      loadMediaToEngine();
-    }
+    if (granted) loadMediaToEngine();
   };
 
   useEffect(() => {
@@ -55,8 +56,8 @@ export default function Canvas({ projectName }: CanvasProps) {
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      
       ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      setHasFrame(true);
     });
   }, []);
 
@@ -65,37 +66,110 @@ export default function Canvas({ projectName }: CanvasProps) {
   }, [currentTime]);
 
   return (
-    <div className="flex-1 flex flex-col bg-gray-100 overflow-hidden bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] min-h-0">
+    <div className="flex-1 flex flex-col overflow-hidden min-h-0" style={{ background: '#0f0f0f' }}>
       <div className="flex-1 flex items-center justify-center p-6 min-h-0 relative">
-        <div 
-          className="group relative shadow-2xl rounded-sm border border-gray-300 bg-white overflow-hidden ring-1 ring-gray-900/5 max-w-full max-h-full"
-          style={{ 
+        <div
+          className="group relative shadow-2xl overflow-hidden max-w-full max-h-full"
+          style={{
             aspectRatio: `${resolution.width} / ${resolution.height}`,
             width: aspectRatio > 1 ? '100%' : 'auto',
             height: aspectRatio > 1 ? 'auto' : '100%',
+            borderRadius: '4px',
           }}
         >
-          <canvas 
+          {/* Empty state: no asset added yet */}
+          {!hasVideoAsset && !hasFrame && (
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center"
+              style={{ background: 'linear-gradient(135deg, #1a1a1a 0%, #111 100%)' }}>
+              <div style={{
+                position: 'absolute', inset: 0,
+                backgroundImage: 'radial-gradient(circle, #333 1px, transparent 1px)',
+                backgroundSize: '24px 24px', opacity: 0.4
+              }} />
+              <div className="relative flex flex-col items-center gap-3 text-center px-8">
+                <div style={{
+                  width: 56, height: 56, borderRadius: 16,
+                  background: 'linear-gradient(135deg, #2a2a2a, #1a1a1a)',
+                  border: '1px solid #333',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                  <Film size={24} color="#666" />
+                </div>
+                <p style={{ color: '#555', fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                  No Media
+                </p>
+                <p style={{ color: '#444', fontSize: 11, lineHeight: 1.5 }}>
+                  Add a video to your timeline<br />to begin editing
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Empty state: asset exists but no frame yet (loading) */}
+          {hasVideoAsset && !hasFrame && !needsPermission && (
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center"
+              style={{ background: '#111' }}>
+              <div style={{
+                position: 'absolute', inset: 0,
+                backgroundImage: 'radial-gradient(circle, #222 1px, transparent 1px)',
+                backgroundSize: '20px 20px'
+              }} />
+              <div className="relative flex flex-col items-center gap-3">
+                <div style={{ position: 'relative', width: 40, height: 40 }}>
+                  <div style={{
+                    position: 'absolute', inset: 0, borderRadius: '50%',
+                    border: '2px solid #333',
+                    borderTopColor: '#666',
+                    animation: 'spin 1s linear infinite'
+                  }} />
+                  <Video size={16} color="#555" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }} />
+                </div>
+                <p style={{ color: '#555', fontSize: 11 }}>Indexing video…</p>
+              </div>
+            </div>
+          )}
+
+          {/* The actual canvas — always rendered, hidden behind empty states */}
+          <canvas
             ref={canvasRef}
             width={resolution.width}
             height={resolution.height}
-            className="w-full h-full bg-black block" 
+            className="w-full h-full block"
+            style={{ background: '#000', display: hasFrame ? 'block' : 'none' }}
           />
 
           {/* Permission Fallback UI */}
           {needsPermission && (
-            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-gray-900/40 backdrop-blur-[2px] animate-in fade-in duration-500">
-              <div className="bg-white rounded-2xl shadow-2xl p-6 flex flex-col items-center max-w-xs text-center border border-gray-100">
-                <div className="w-12 h-12 bg-orange-50 rounded-full flex items-center justify-center mb-4">
-                  <Lock size={22} className="text-orange-600" />
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center"
+              style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}>
+              <div style={{
+                background: '#1a1a1a', border: '1px solid #2a2a2a',
+                borderRadius: 16, padding: '24px', maxWidth: 280,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center'
+              }}>
+                <div style={{
+                  width: 48, height: 48, borderRadius: '50%',
+                  background: 'rgba(251,146,60,0.1)',
+                  border: '1px solid rgba(251,146,60,0.2)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16
+                }}>
+                  <Lock size={20} color="#f97316" />
                 </div>
-                <h3 className="text-sm font-bold text-gray-900 mb-1">Media Access Required</h3>
-                <p className="text-[11px] text-gray-500 mb-6 leading-relaxed">
-                  Browser security requires a manual click to re-open your local files after a refresh.
+                <p style={{ color: '#e5e5e5', fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+                  Media Access Required
+                </p>
+                <p style={{ color: '#666', fontSize: 11, lineHeight: 1.6, marginBottom: 20 }}>
+                  Browser security requires a click to re-open local files after a refresh.
                 </p>
                 <button
                   onClick={handleReconnect}
-                  className="w-full py-2.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-gray-800 transition-all flex items-center justify-center gap-2"
+                  style={{
+                    width: '100%', padding: '10px 16px',
+                    background: '#f97316', color: 'white',
+                    border: 'none', borderRadius: 10, cursor: 'pointer',
+                    fontSize: 12, fontWeight: 700,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
+                  }}
                 >
                   <ShieldAlert size={14} />
                   Restore Access
@@ -103,10 +177,13 @@ export default function Canvas({ projectName }: CanvasProps) {
               </div>
             </div>
           )}
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-white border border-gray-200 rounded-md px-2 py-1 opacity-0 group-hover:opacity-100 z-20 transition-opacity shadow-sm">
-            <div className="flex items-center gap-1 border-r border-gray-200 pr-2">
-              <TextIcon size={13} className="text-gray-400" />
-              <select className="bg-transparent text-xs font-medium text-gray-900 outline-none w-10 cursor-pointer">
+
+          {/* Floating canvas toolbar */}
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 z-20 transition-opacity"
+            style={{ background: 'rgba(20,20,20,0.9)', border: '1px solid #333', borderRadius: 8, padding: '4px 8px' }}>
+            <div className="flex items-center gap-1" style={{ borderRight: '1px solid #333', paddingRight: 8 }}>
+              <TextIcon size={13} color="#888" />
+              <select className="bg-transparent text-xs font-medium outline-none cursor-pointer" style={{ color: '#ccc', width: 40 }}>
                 <option>12</option>
                 <option>18</option>
                 <option>24</option>
@@ -114,43 +191,51 @@ export default function Canvas({ projectName }: CanvasProps) {
                 <option>48</option>
               </select>
             </div>
-            <button className="p-1 hover:bg-gray-100 rounded" title="Center Text">
-              <AlignCenter size={14} className="text-gray-500" />
+            <button className="p-1 rounded transition-colors hover:bg-white/10" title="Center Text">
+              <AlignCenter size={14} color="#888" />
             </button>
-            <button className="p-1 hover:bg-gray-100 rounded" title="Rotate">
-              <RotateCw size={14} className="text-gray-500" />
+            <button className="p-1 rounded transition-colors hover:bg-white/10" title="Rotate">
+              <RotateCw size={14} color="#888" />
             </button>
           </div>
-          <div className="absolute bottom-3 right-3 flex items-center gap-2 bg-white/90 border border-gray-200 rounded-md px-2.5 py-1.5 opacity-0 group-hover:opacity-100 z-20 transition-opacity shadow-sm">
-            <input
-              type="range"
-              min="10"
-              max="200"
-              defaultValue="100"
-              className="w-16 h-1 bg-gray-200 rounded-full appearance-none cursor-pointer accent-gray-900"
+
+          {/* Zoom controls */}
+          <div className="absolute bottom-3 right-3 flex items-center gap-2 opacity-0 group-hover:opacity-100 z-20 transition-opacity"
+            style={{ background: 'rgba(20,20,20,0.9)', border: '1px solid #333', borderRadius: 8, padding: '6px 10px' }}>
+            <input type="range" min="10" max="200" defaultValue="100"
+              className="w-16 h-1 rounded-full appearance-none cursor-pointer"
+              style={{ accentColor: '#888' }}
             />
-            <span className="text-[9px] font-mono text-gray-500 w-8 text-right font-bold">100%</span>
+            <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#666', width: 32, textAlign: 'right', fontWeight: 700 }}>100%</span>
           </div>
         </div>
       </div>
-      <div className="h-9 px-6 flex items-center justify-between text-[10px] bg-white border-t border-gray-200 flex-shrink-0">
-        <div className="flex items-center gap-4">
-          <span className="font-bold text-gray-900">{resolution.width} × {resolution.height}</span>
-          <span className="text-gray-300">|</span>
-          <span className="font-mono text-gray-400">{fps} FPS</span>
-          <span className="text-gray-300">|</span>
-          <span className="text-gray-400 italic">No Processing Engine</span>
+
+      {/* Info strip */}
+      <div style={{ height: 36, padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0a0a0a', borderTop: '1px solid #1a1a1a' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: '#666' }}>{resolution.width} × {resolution.height}</span>
+          <span style={{ color: '#2a2a2a' }}>|</span>
+          <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#444' }}>{fps} FPS</span>
+          {hasFrame && (
+            <>
+              <span style={{ color: '#2a2a2a' }}>|</span>
+              <span style={{ fontSize: 10, color: '#3a7c3a', fontWeight: 600 }}>● Live</span>
+            </>
+          )}
         </div>
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-gray-900 font-bold">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#888', fontWeight: 700 }}>
             {formatTimecode(currentTime, fps)}
           </span>
-          <span className="text-gray-300">/</span>
-          <span className="font-mono text-gray-400">
+          <span style={{ color: '#2a2a2a' }}>/</span>
+          <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#444' }}>
             {formatTimecode(duration, fps)}
           </span>
         </div>
       </div>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
