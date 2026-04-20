@@ -3,7 +3,16 @@ import { Layers, Upload, Type, Settings } from 'lucide-react';
 import Link from 'next/link';
 
 export default function Sidebar() {
-  const { activeTab, setActiveTab } = useEditorStore();
+  const { activeTab, setActiveTab, isSidebarOpen, setIsSidebarOpen } = useEditorStore();
+
+  const handleTabClick = (id: SidebarTab) => {
+    if (activeTab === id && isSidebarOpen) {
+      setIsSidebarOpen(false);
+    } else {
+      setActiveTab(id);
+      setIsSidebarOpen(true);
+    }
+  };
 
   const tabs: { id: SidebarTab; icon: any; label: string; tooltip: string }[] = [
     { id: 'assets', icon: Upload, label: 'Assets', tooltip: 'Media library' },
@@ -20,7 +29,7 @@ export default function Sidebar() {
         return (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => handleTabClick(tab.id)}
             className={`relative p-3 rounded-md group flex flex-col items-center gap-1 transition-all duration-200 ${
               isActive
                 ? 'bg-red-50 text-red-700 border border-red-100'

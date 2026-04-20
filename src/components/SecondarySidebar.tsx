@@ -6,7 +6,9 @@ import { useProjectStore } from '@/store/useProjectStore';
 import { X, Upload, Film, Music, AlignLeft, AlignCenter, AlignRight, ChevronRight, Mic } from 'lucide-react';
 
 export default function SecondarySidebar() {
-  const { activeTab, setActiveTab } = useEditorStore();
+  const { activeTab, isSidebarOpen, setIsSidebarOpen } = useEditorStore();
+
+  if (!isSidebarOpen) return null;
 
   const labels: Record<string, string> = {
     assets: 'Assets',
@@ -16,9 +18,15 @@ export default function SecondarySidebar() {
   };
 
   return (
-    <div className="w-[300px] flex-shrink-0 h-full bg-white border-r border-gray-200 flex flex-col">
+    <div className="w-[300px] flex-shrink-0 h-full bg-white border-r border-gray-200 flex flex-col animate-in slide-in-from-left duration-200">
       <div className="h-[44px] px-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
         <span className="text-xs font-semibold text-gray-900 tracking-tight">{labels[activeTab]}</span>
+        <button 
+          onClick={() => setIsSidebarOpen(false)}
+          className="p-1 hover:bg-gray-50 rounded text-gray-400 hover:text-gray-900 transition-colors"
+        >
+          <X size={14} />
+        </button>
       </div>
       <div className="flex-1 overflow-y-auto">
         {activeTab === 'assets' && <AssetsPanel />}

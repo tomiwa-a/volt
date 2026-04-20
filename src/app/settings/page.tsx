@@ -1,14 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppStore, Theme, ExportFormat, Resolution, FrameRate } from '@/store/useAppStore';
+import { engine } from '@/lib/engine/EngineService';
 import {
   SlidersHorizontal,
   Database,
   Cpu,
   Mic,
   ChevronLeft,
-  HardDrive,
   Trash2,
   Download,
   CheckCircle2,
@@ -179,6 +179,17 @@ function StorageSettings() {
 function EngineSettings() {
   const [hwAccel, setHwAccel] = useState(true);
   const [workerThreads, setWorkerThreads] = useState('4');
+  const [engineStats, setEngineStats] = useState<{ status: string; version: string } | null>(null);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const stats = engine.getStats();
+      if (stats) setEngineStats(stats);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const isActive = engineStats?.status === 'active';
 
   return (
     <div className="space-y-8">
@@ -187,12 +198,14 @@ function EngineSettings() {
       <SettingsGroup label="Status">
         <SettingsRow label="Engine binary" note="engine.wasm loaded from /public">
           <div className="flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-            <span className="text-xs font-semibold text-green-700">Active</span>
+            <span className={`h-1.5 w-1.5 rounded-full ${isActive ? 'bg-green-500' : 'bg-gray-300'}`} />
+            <span className={`text-xs font-semibold ${isActive ? 'text-green-700' : 'text-gray-400'}`}>
+              {isActive ? 'Active' : 'Initializing…'}
+            </span>
           </div>
         </SettingsRow>
         <SettingsRow label="Version" note="">
-          <span className="text-xs font-mono text-gray-500">v1.0.4</span>
+          <span className="text-xs font-mono text-gray-500">{engineStats?.version || 'v—'}</span>
         </SettingsRow>
         <SettingsRow label="SharedArrayBuffer" note="Required for zero-copy frame passing">
           <div className="flex items-center gap-2">

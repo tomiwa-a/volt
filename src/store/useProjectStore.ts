@@ -1,21 +1,21 @@
 import { create } from 'zustand';
+import { db } from '@/lib/db/db';
 
 export interface Asset {
   id: string;
   name: string;
-  type: 'video' | 'audio';
+  type: 'video' | 'audio' | 'image';
   duration: number; // ms
   size: number;
-  handle?: FileSystemFileHandle; // From File System Access API
-  url?: string; // For preview/rendering
+  handle?: FileSystemFileHandle; 
 }
 
 export interface Clip {
   id: string;
   assetId: string;
-  startTime: number; // offset in timeline (ms)
-  duration: number; // duration of clip on timeline (ms)
-  assetOffset: number; // where in the asset the clip starts (ms)
+  startTime: number; 
+  duration: number; 
+  assetOffset: number; 
 }
 
 export interface Track {
@@ -29,10 +29,12 @@ interface ProjectState {
   name: string;
   assets: Asset[];
   tracks: Track[];
+  fps: number;
+  resolution: { width: number; height: number; label: string };
   
   // Actions
-  setProjectId: (id: string) => void;
-  setProjectName: (name: string) => void;
+  setProject: (data: Partial<ProjectState>) => void;
+  loadProject: (id: string) => Promise<void>;
   addAsset: (asset: Asset) => void;
   removeAsset: (assetId: string) => void;
   addClip: (trackId: string, clip: Clip) => void;
@@ -42,23 +44,48 @@ interface ProjectState {
   clearProject: () => void;
 }
 
-export const useProjectStore = create<ProjectState>((set) => ({
-  id: 'project-1',
-  name: 'Summer Vlog 2024',
-  assets: [
-    { id: 'a1', name: 'vlog_intro.mp4', type: 'video', duration: 12500, size: 24500000 },
-    { id: 'a2', name: 'beach_broll.mp4', type: 'video', duration: 8200, size: 15100000 },
-    { id: 'a3', name: 'lofi_vibes.mp3', type: 'audio', duration: 185000, size: 8200000 },
-    { id: 'a4', name: 'voiceover.wav', type: 'audio', duration: 32000, size: 12400000 },
-  ],
-  tracks: [
-    { id: 'video-1', type: 'video', clips: [] },
-    { id: 'audio-1', type: 'audio', clips: [] },
-    { id: 'captions-1', type: 'captions', clips: [] },
-  ],
+const DEFAULT_TRACKS: Track[] = [
+  { id: 'video-1', type: 'video', clips: [] },
+  { id: 'audio-1', type: 'audio', clips: [] },
+  { id: 'captions-1', type: 'captions', clips: [] },
+];
 
-  setProjectId: (id) => set({ id }),
-  setProjectName: (name) => set({ name }),
+export const useProjectStore = create<ProjectState>((set) => ({
+  id: null,
+  name: 'New Project',
+  assets: [],
+  tracks: DEFAULT_TRACKS,
+  fps: 30,
+  resolution: { width: 1920, height: 1080, label: '1080p' },
+
+  setProject: (data) => set((state) => ({ ...state, ...data })),
+
+  loadProject: async (id) => {
+    const projectId = parseInt(id);
+    const project = await db.projects.get(projectId);
+    if (!project) return;
+
+    // Load timeline (EDL) if it exists, otherwise use defaults
+    const timeline = await db.timeline.where('projectId').equals(projectId).first();
+    const assets = await db.assets.where('projectId').equals(projectId).toArray();
+
+    set({
+      id: project.id?.toString() || id,
+      name: project.name,
+      fps: project.fps,
+      resolution: project.resolution,
+      assets: assets.map(a => ({
+        id: a.id?.toString() || '',
+        name: a.name,
+        type: a.type,
+        duration: a.duration,
+        size: a.size,
+        handle: a.fileHandle
+      })),
+      tracks: timeline?.tracks || DEFAULT_TRACKS,
+    });
+  },
+
   addAsset: (asset) => set((state) => ({ assets: [...state.assets, asset] })),
   removeAsset: (assetId) => set((state) => ({ 
     assets: state.assets.filter(a => a.id !== assetId) 
@@ -84,12 +111,10 @@ export const useProjectStore = create<ProjectState>((set) => ({
   setTracks: (tracks) => set({ tracks }),
   clearProject: () => set({
     id: null,
-    name: 'Untitled Project',
+    name: 'New Project',
     assets: [],
-    tracks: [
-      { id: 'video-1', type: 'video', clips: [] },
-      { id: 'audio-1', type: 'audio', clips: [] },
-      { id: 'captions-1', type: 'captions', clips: [] },
-    ],
+    tracks: DEFAULT_TRACKS,
+    fps: 30,
+    resolution: { width: 1920, height: 1080, label: '1080p' },
   }),
 }));

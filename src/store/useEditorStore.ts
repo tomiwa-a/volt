@@ -16,6 +16,7 @@ interface EditorState {
   isExporting: boolean;
   showStats: boolean;
   isTimelineCollapsed: boolean;
+  isSidebarOpen: boolean;
 
   // Actions
   setIsPlaying: (isPlaying: boolean) => void;
@@ -29,6 +30,7 @@ interface EditorState {
   setIsExporting: (isExporting: boolean) => void;
   setShowStats: (show: boolean) => void;
   setIsTimelineCollapsed: (collapsed: boolean) => void;
+  setIsSidebarOpen: (open: boolean) => void;
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -43,6 +45,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   isExporting: false,
   showStats: false,
   isTimelineCollapsed: false,
+  isSidebarOpen: true,
 
   setIsPlaying: (isPlaying) => set({ isPlaying }),
   togglePlayback: () => set((state) => ({ isPlaying: !state.isPlaying })),
@@ -55,4 +58,5 @@ export const useEditorStore = create<EditorState>((set) => ({
   setIsExporting: (isExporting) => set({ isExporting }),
   setShowStats: (showStats) => set({ showStats }),
   setIsTimelineCollapsed: (isTimelineCollapsed) => set({ isTimelineCollapsed }),
+  setIsSidebarOpen: (isSidebarOpen) => set({ isSidebarOpen }),
 }));
