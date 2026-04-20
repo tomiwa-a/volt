@@ -29,8 +29,15 @@ export interface Clip {
 
 export interface Track {
   id: TrackId;
-  type: 'video' | 'audio' | 'captions';
+  type: TrackType;
   clips: Clip[];
+}
+
+export interface TrackStyle {
+  label: string;
+  bg: string;
+  border: string;
+  text: string;
 }
 
 export interface Project {

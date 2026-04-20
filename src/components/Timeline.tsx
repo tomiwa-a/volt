@@ -3,7 +3,7 @@ import { useEditorStore } from '@/store/useEditorStore';
 import { useProjectStore } from '@/store/useProjectStore';
 import { engine } from '@/lib/engine/EngineService';
 import { formatTimecode } from '@/lib/utils/timecode';
-import { TrackType } from '@/types/schema';
+import { TrackType, TrackStyle } from '@/types/schema';
 import { ms } from '@/types/units';
 import {
   Play, Pause, SkipBack, SkipForward,
@@ -14,7 +14,7 @@ interface TimelineProps {
   projectName: string;
 }
 
-const TRACK_METADATA: Record<TrackType, { label: string; bg: string; border: string; text: string }> = {
+const TRACK_METADATA: Record<TrackType, TrackStyle> = {
   video: { label: 'Video',    bg: 'bg-orange-50',  border: 'border-orange-200', text: 'text-orange-700' },
   audio: { label: 'Audio',    bg: 'bg-sky-50',     border: 'border-sky-200',    text: 'text-sky-700'    },
   captions: { label: 'Captions', bg: 'bg-violet-50',  border: 'border-violet-200', text: 'text-violet-700' },
