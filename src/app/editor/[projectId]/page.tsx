@@ -1,46 +1,65 @@
 'use client';
 
 import { useRouter, useParams } from 'next/navigation';
+import { useState } from 'react';
 import EditorHeader from '@/components/EditorHeader';
 import Sidebar from '@/components/Sidebar';
+import SecondarySidebar from '@/components/SecondarySidebar';
 import Canvas from '@/components/Canvas';
 import Timeline from '@/components/Timeline';
-import { useState } from 'react';
+import ExportModal from '@/components/ExportModal';
 
 export default function EditorPage() {
   const router = useRouter();
   const params = useParams();
   const projectId = params.projectId as string;
-  const [activeTab, setActiveTab] = useState('layers');
+
+  const [activeTab, setActiveTab] = useState('assets');
+  const [isPanelOpen, setIsPanelOpen] = useState(true);
+  const [isExportOpen, setIsExportOpen] = useState(false);
 
   const projectName = 'Summer Vlog 2026'; // TODO: Fetch from IndexedDB
+
+  const handleTabClick = (tabId: string) => {
+    if (activeTab === tabId) {
+      setIsPanelOpen(!isPanelOpen);
+    } else {
+      setActiveTab(tabId);
+      setIsPanelOpen(true);
+    }
+  };
 
   return (
     <main className="flex h-screen w-full flex-col overflow-hidden bg-gray-50 text-gray-900">
       <EditorHeader
         projectName={projectName}
         onBack={() => router.push('/')}
+        onExport={() => setIsExportOpen(true)}
       />
 
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar activeTab={activeTab} />
+      <div className="flex flex-1 overflow-hidden relative">
+        <Sidebar
+          activeTab={activeTab}
+          onTabClick={handleTabClick}
+        />
 
-        {/* Main Editor Workspace */}
+        <SecondarySidebar
+          activeTab={activeTab}
+          isOpen={isPanelOpen}
+          onClose={() => setIsPanelOpen(false)}
+        />
+
         <div className="flex flex-1 flex-col overflow-hidden">
           <Canvas projectName={projectName} />
           <Timeline projectName={projectName} />
         </div>
-
-        {/* Right Panel (Sidebar Content) - TODO */}
-        <div className="w-64 border-l border-gray-200 bg-white p-4 overflow-y-auto hidden">
-          <div className="text-xs text-gray-500">
-            {activeTab === 'layers' && <p>Layers panel</p>}
-            {activeTab === 'uploads' && <p>Uploads panel</p>}
-            {activeTab === 'captions' && <p>Captions panel</p>}
-            {activeTab === 'magic' && <p>Magic panel</p>}
-          </div>
-        </div>
       </div>
+
+      <ExportModal
+        projectName={projectName}
+        isOpen={isExportOpen}
+        onClose={() => setIsExportOpen(false)}
+      />
     </main>
   );
 }
