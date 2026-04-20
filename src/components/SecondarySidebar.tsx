@@ -43,7 +43,7 @@ export default function SecondarySidebar() {
   );
 }
 
-type AssetFilter = 'all' | 'video' | 'audio';
+type AssetFilter = 'all' | 'video' | 'audio' | 'image';
 
 function AssetsPanel() {
   const { assets, id: projectId, addAsset, addClip } = useProjectStore();
@@ -53,6 +53,13 @@ function AssetsPanel() {
   const [verifyingIds, setVerifyingIds] = useState<Set<string>>(new Set());
 
   const filtered = assets.filter(a => filter === 'all' || a.type === filter);
+
+  const counts = {
+    all: assets.length,
+    video: assets.filter(a => a.type === 'video').length,
+    audio: assets.filter(a => a.type === 'audio').length,
+    image: assets.filter(a => a.type === 'image').length,
+  };
 
   const handleImport = async () => {
     setIsImporting(true);
@@ -74,7 +81,7 @@ function AssetsPanel() {
       setIsImporting(false);
     }
   };
-
+  
   const handleVerify = async (asset: Asset) => {
     if (!asset.handle) return;
     setVerifyingIds(prev => new Set(prev).add(asset.id));
@@ -116,29 +123,34 @@ function AssetsPanel() {
     { id: 'all',   label: 'All' },
     { id: 'video', label: 'Video' },
     { id: 'audio', label: 'Audio' },
+    { id: 'image', label: 'Images' },
   ];
 
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Filter row */}
-      <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-1">
+      <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
         {filters.map(f => (
           <button
             key={f.id}
             onClick={() => setFilter(f.id)}
-            className={`px-3 py-1 rounded-full text-[11px] font-semibold transition-colors ${
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all duration-200 border ${
               filter === f.id
-                ? 'bg-gray-900 text-white'
-                : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
+                ? 'bg-gray-900 text-white border-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50 border-transparent'
             }`}
           >
             {f.label}
+            <span className={`ml-1.5 opacity-50 font-mono ${filter === f.id ? 'text-white' : 'text-gray-400'}`}>
+              {counts[f.id]}
+            </span>
           </button>
         ))}
+        <div className="flex-1" />
         <button
           onClick={handleImport}
           disabled={isImporting}
-          className="ml-auto p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors disabled:opacity-50"
+          className="p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors disabled:opacity-50"
           title="Import media"
         >
           {isImporting ? <div className="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" /> : <Upload size={14} />}

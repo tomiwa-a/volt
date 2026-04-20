@@ -33,7 +33,7 @@ export class MediaService {
       });
 
       const file = await handle.getFile();
-      const type = file.type.startsWith('video') ? 'video' : file.type.startsWith('audio') ? 'audio' : 'image';
+      const type = this.getMediaType(file);
       
       let duration = ms(0);
       if (type === 'video' || type === 'audio') {
@@ -53,6 +53,28 @@ export class MediaService {
       if ((err as Error).name === 'AbortError') return null;
       throw err;
     }
+  }
+
+  /**
+   * Robustly detects the media type from a file by checking MIME and extension.
+   */
+  private getMediaType(file: File): 'video' | 'audio' | 'image' {
+    const type = file.type.toLowerCase();
+    if (type.startsWith('video/')) return 'video';
+    if (type.startsWith('audio/')) return 'audio';
+    if (type.startsWith('image/')) return 'image';
+
+    // Fallback to extension check for ambiguous MIME types (like QuickTime .mov)
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    const videoExts = ['mov', 'mp4', 'webm', 'ogv', 'mkv'];
+    const audioExts = ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac'];
+    const imageExts = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'];
+
+    if (ext && videoExts.includes(ext)) return 'video';
+    if (ext && audioExts.includes(ext)) return 'audio';
+    if (ext && imageExts.includes(ext)) return 'image';
+
+    return 'image'; // Default fallback
   }
 
   /**
