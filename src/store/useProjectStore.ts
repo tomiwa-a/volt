@@ -71,29 +71,117 @@ export const useProjectStore = create<ProjectState>((set) => ({
     });
   },
 
-  addAsset: (asset) => set((state) => ({ assets: [...state.assets, asset] })),
-  removeAsset: (assetId) => set((state) => ({ 
-    assets: state.assets.filter(a => a.id !== assetId) 
-  })),
-  addClip: (trackId, clip) => set((state) => ({
-    tracks: state.tracks.map(t => 
-      t.id === trackId ? { ...t, clips: [...t.clips, clip] } : t
-    )
-  })),
-  removeClip: (trackId, clipId) => set((state) => ({
-    tracks: state.tracks.map(t => 
-      t.id === trackId ? { ...t, clips: t.clips.filter(c => c.id !== clipId) } : t
-    )
-  })),
-  updateClip: (trackId, clipId, updates) => set((state) => ({
-    tracks: state.tracks.map(t => 
-      t.id === trackId ? {
-        ...t,
-        clips: t.clips.map(c => c.id === clipId ? { ...c, ...updates } : c)
-      } : t
-    )
-  })),
-  setTracks: (tracks) => set({ tracks }),
+  addAsset: async (asset: Asset) => {
+    const state = useProjectStore.getState();
+    const projectId = state.id;
+    if (!projectId) return;
+
+    // Persist to DB
+    await db.assets.add({
+      ...asset,
+      projectId: asProjectId(projectId)
+    });
+
+    set((state) => {
+      const isFirstVideo = asset.type === 'video' && !state.assets.some(a => a.type === 'video');
+      const newAssets = [...state.assets, asset];
+      
+      // Auto-add to timeline if it's the first video
+      let newTracks = state.tracks;
+      if (isFirstVideo) {
+        const videoTrack = state.tracks.find(t => t.type === 'video');
+        if (videoTrack) {
+          const newClip: Clip = {
+            id: generateId('clip') as ClipId,
+            assetId: asset.id,
+            startTime: ms(0),
+            duration: asset.duration,
+            assetOffset: ms(0),
+          };
+          newTracks = state.tracks.map(t => 
+            t.id === videoTrack.id ? { ...t, clips: [...t.clips, newClip] } : t
+          );
+          // Async update timeline in DB
+          db.timeline.where('projectId').equals(projectId).first().then(tl => {
+            if (tl) db.timeline.update(tl.id!, { tracks: newTracks });
+            else db.timeline.add({ id: generateId('proj'), projectId: asProjectId(projectId), tracks: newTracks });
+          });
+        }
+      }
+
+      return { assets: newAssets, tracks: newTracks };
+    });
+  },
+
+  removeAsset: async (assetId: AssetId) => {
+    set((state) => ({ 
+      assets: state.assets.filter(a => a.id !== assetId) 
+    }));
+    await db.assets.delete(assetId);
+  },
+
+  addClip: async (trackId: TrackId, clip: Clip) => {
+    set((state) => {
+      const newTracks = state.tracks.map(t => 
+        t.id === trackId ? { ...t, clips: [...t.clips, clip] } : t
+      );
+      
+      const projectId = state.id;
+      if (projectId) {
+        db.timeline.where('projectId').equals(projectId).first().then(tl => {
+          if (tl) db.timeline.update(tl.id!, { tracks: newTracks });
+        });
+      }
+      
+      return { tracks: newTracks };
+    });
+  },
+
+  removeClip: async (trackId: TrackId, clipId: ClipId) => {
+    set((state) => {
+      const newTracks = state.tracks.map(t => 
+        t.id === trackId ? { ...t, clips: t.clips.filter(c => c.id !== clipId) } : t
+      );
+      
+      const projectId = state.id;
+      if (projectId) {
+        db.timeline.where('projectId').equals(projectId).first().then(tl => {
+          if (tl) db.timeline.update(tl.id!, { tracks: newTracks });
+        });
+      }
+
+      return { tracks: newTracks };
+    });
+  },
+
+  updateClip: async (trackId: TrackId, clipId: ClipId, updates: Partial<Clip>) => {
+    set((state) => {
+      const newTracks = state.tracks.map(t => 
+        t.id === trackId ? {
+          ...t,
+          clips: t.clips.map(c => c.id === clipId ? { ...c, ...updates } : c)
+        } : t
+      );
+
+      const projectId = state.id;
+      if (projectId) {
+        db.timeline.where('projectId').equals(projectId).first().then(tl => {
+          if (tl) db.timeline.update(tl.id!, { tracks: newTracks });
+        });
+      }
+
+      return { tracks: newTracks };
+    });
+  },
+  
+  setTracks: async (tracks: Track[]) => {
+    set({ tracks });
+    const state = useProjectStore.getState();
+    if (state.id) {
+      const tl = await db.timeline.where('projectId').equals(state.id).first();
+      if (tl) await db.timeline.update(tl.id!, { tracks });
+    }
+  },
   clearProject: () => set({
     id: null,
     name: 'New Project',

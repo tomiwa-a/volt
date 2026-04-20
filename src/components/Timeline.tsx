@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useEditorStore } from '@/store/useEditorStore';
+import { useProjectStore } from '@/store/useProjectStore';
 import { engine } from '@/lib/engine/EngineService';
+import { formatTimecode } from '@/lib/utils/timecode';
+import { TrackType } from '@/types/schema';
+import { ms } from '@/types/units';
 import {
   Play, Pause, SkipBack, SkipForward,
   Rewind, FastForward, Maximize2, ChevronDown, ChevronUp,
@@ -10,13 +14,11 @@ interface TimelineProps {
   projectName: string;
 }
 
-const TRACKS = [
-  { id: 'video',    label: 'Video',    bg: 'bg-orange-50',  border: 'border-orange-200', text: 'text-orange-700' },
-  { id: 'audio',    label: 'Audio',    bg: 'bg-sky-50',     border: 'border-sky-200',    text: 'text-sky-700'    },
-  { id: 'captions', label: 'Captions', bg: 'bg-violet-50',  border: 'border-violet-200', text: 'text-violet-700' },
-];
-
-const RULER_MARKS = ['0:00', '0:05', '0:10', '0:15', '0:20', '0:25', '0:30'];
+const TRACK_METADATA: Record<TrackType, { label: string; bg: string; border: string; text: string }> = {
+  video: { label: 'Video',    bg: 'bg-orange-50',  border: 'border-orange-200', text: 'text-orange-700' },
+  audio: { label: 'Audio',    bg: 'bg-sky-50',     border: 'border-sky-200',    text: 'text-sky-700'    },
+  captions: { label: 'Captions', bg: 'bg-violet-50',  border: 'border-violet-200', text: 'text-violet-700' },
+};
 
 export default function Timeline({ projectName }: TimelineProps) {
   const { 
@@ -25,11 +27,19 @@ export default function Timeline({ projectName }: TimelineProps) {
     showStats, 
     setShowStats, 
     isTimelineCollapsed: isCollapsed, 
-    setIsTimelineCollapsed: setIsCollapsed 
+    setIsTimelineCollapsed: setIsCollapsed,
+    zoomLevel,
+    setZoomLevel,
+    currentTime
   } = useEditorStore();
+
+  const { tracks, fps, assets } = useProjectStore();
 
   const [mutedTracks, setMutedTracks] = useState<Set<string>>(new Set());
   const [engineStatus, setEngineStatus] = useState('initializing');
+
+  // Scale: 100px = 1 second (1000ms) at 100% zoom
+  const msToPx = (ms: number) => (ms / 1000) * (zoomLevel / 100) * 100;
 
   useEffect(() => {
     if (showStats) {
@@ -50,6 +60,16 @@ export default function Timeline({ projectName }: TimelineProps) {
       return next;
     });
   };
+
+  // Generate ruler marks based on zoom
+  const rulerMarks = Array.from({ length: 11 }, (_, i) => {
+    const time = i * 5000; // Every 5 seconds
+    return {
+      time,
+      label: `${Math.floor(time / 1000)}s`,
+      left: msToPx(time)
+    };
+  });
 
   return (
     <div className="flex-shrink-0 border-t border-gray-200 bg-white flex flex-col">
@@ -73,29 +93,32 @@ export default function Timeline({ projectName }: TimelineProps) {
         <div className="flex items-center gap-4">
           {/* Timecode */}
           <div className="flex items-center gap-1.5 text-[11px] font-mono text-gray-500">
-            <span className="text-gray-900 font-semibold">00:00:00:00</span>
+            <span className="text-gray-900 font-semibold">{formatTimecode(currentTime, fps)}</span>
             <span className="text-gray-300">/</span>
-            <span>00:12:34:00</span>
+            <span>00:00:30:00</span>
             <span className="ml-1 text-gray-300 font-sans">·</span>
-            <span>30 fps</span>
+            <span>{fps} fps</span>
           </div>
 
           {/* Track visibility toggles */}
           <div className="flex items-center gap-1">
-            {TRACKS.map(t => (
-              <button
-                key={t.id}
-                title={`Toggle ${t.label} track`}
-                onClick={() => toggleTrackMute(t.id)}
-                className={`text-[10px] font-bold w-6 h-6 rounded flex items-center justify-center border transition-colors ${
-                  mutedTracks.has(t.id)
-                    ? 'border-gray-200 text-gray-300 bg-gray-50'
-                    : `${t.border} ${t.text} ${t.bg}`
-                }`}
-              >
-                {t.label[0]}
-              </button>
-            ))}
+            {tracks.map(t => {
+              const meta = TRACK_METADATA[t.type];
+              return (
+                <button
+                  key={t.id}
+                  title={`Toggle ${meta.label} track`}
+                  onClick={() => toggleTrackMute(t.id)}
+                  className={`text-[10px] font-bold w-6 h-6 rounded flex items-center justify-center border transition-colors ${
+                    mutedTracks.has(t.id)
+                      ? 'border-gray-200 text-gray-300 bg-gray-50'
+                      : `${meta.border} ${meta.text} ${meta.bg}`
+                  }`}
+                >
+                  {meta.label[0]}
+                </button>
+              );
+            })}
           </div>
 
           {/* Fullscreen */}
@@ -138,34 +161,70 @@ export default function Timeline({ projectName }: TimelineProps) {
 
       {/* ── Track area ── */}
       {!isCollapsed && (
-        <div className="flex flex-col" style={{ height: 148 }}>
+        <div className="flex flex-col relative" style={{ height: 180 }}>
           {/* Ruler */}
-          <div className="flex-shrink-0 h-6 border-b border-gray-100 bg-gray-50 flex items-center overflow-hidden">
-            <div className="flex pl-2 gap-0 w-full">
-              {RULER_MARKS.map((m, i) => (
-                <div key={m} className="flex-1 flex items-center">
-                  <span className="text-[10px] font-mono text-gray-400">{m}</span>
+          <div className="flex-shrink-0 h-6 border-b border-gray-100 bg-gray-50 flex items-center relative overflow-hidden">
+            <div className="absolute inset-0 pl-16">
+              {rulerMarks.map((m) => (
+                <div 
+                  key={m.time} 
+                  className="absolute top-0 bottom-0 border-l border-gray-200"
+                  style={{ left: m.left }}
+                >
+                  <span className="text-[9px] font-mono text-gray-400 ml-1 mt-1 block">{m.label}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Tracks */}
+          {/* Tracks container */}
           <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
-            {TRACKS.filter(t => !mutedTracks.has(t.id)).map(t => (
-              <div key={t.id} className="flex items-stretch h-11">
-                {/* Track label */}
-                <div className="w-16 flex-shrink-0 flex items-center px-2.5 border-r border-gray-100">
-                  <span className={`text-[10px] font-bold ${t.text}`}>{t.label}</span>
-                </div>
-                {/* Clip area */}
-                <div className="flex-1 px-1 py-1.5 bg-gray-50 relative">
-                  <div className={`h-full rounded ${t.bg} border ${t.border} flex items-center px-2`}>
-                    <span className={`text-[10px] font-mono ${t.text} opacity-70`}>{projectName}</span>
+            {tracks.filter(t => !mutedTracks.has(t.id)).map(t => {
+              const meta = TRACK_METADATA[t.type];
+              return (
+                <div key={t.id} className="flex items-stretch h-12">
+                  {/* Track label */}
+                  <div className="w-16 flex-shrink-0 flex items-center px-2.5 border-r border-gray-100 bg-white sticky left-0 z-10 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.05)]">
+                    <span className={`text-[10px] font-bold ${meta.text}`}>{meta.label}</span>
+                  </div>
+                  {/* Clip area */}
+                  <div className="flex-1 relative bg-gray-50 group/track">
+                    {/* Grid lines (simplified) */}
+                    <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundSize: `${msToPx(1000)}px 100%`, backgroundImage: 'linear-gradient(to right, #ccc 1px, transparent 1px)' }} />
+                    
+                    {t.clips.map(clip => {
+                      const asset = assets.find(a => a.id === clip.assetId);
+                      return (
+                        <div
+                          key={clip.id}
+                          className={`absolute inset-y-1 rounded border shadow-sm flex items-center px-2 min-w-[20px] cursor-pointer group/clip ${meta.bg} ${meta.border} transition-transform active:scale-[0.99]`}
+                          style={{
+                            left: msToPx(clip.startTime),
+                            width: msToPx(clip.duration),
+                          }}
+                        >
+                          <span className={`text-[10px] font-bold truncate ${meta.text}`}>
+                            {asset?.name || 'Missing Asset'}
+                          </span>
+                          
+                          {/* Handles (for visual only now) */}
+                          <div className="absolute left-0 top-0 bottom-0 w-1 group-hover/clip:bg-white/50 cursor-ew-resize" />
+                          <div className="absolute right-0 top-0 bottom-0 w-1 group-hover/clip:bg-white/50 cursor-ew-resize" />
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
+          </div>
+
+          {/* Current Time Indicator (Playhead) */}
+          <div 
+            className="absolute top-0 bottom-0 w-px bg-red-600 z-20 pointer-events-none"
+            style={{ left: 64 + msToPx(currentTime) }}
+          >
+            <div className="absolute -top-1 -left-[5px] w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[8px] border-t-red-600" />
           </div>
         </div>
       )}
@@ -200,15 +259,17 @@ export default function Timeline({ projectName }: TimelineProps) {
 
         {/* Zoom */}
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-semibold text-gray-400">Zoom</span>
+          <span className="text-[10px] font-semibold text-gray-400 tracking-tight">Zoom</span>
           <input
             type="range"
-            min="50"
-            max="300"
-            defaultValue="100"
-            className="w-20 h-1 bg-gray-200 rounded-full appearance-none cursor-pointer accent-gray-900"
+            min="10"
+            max="400"
+            value={zoomLevel}
+            onChange={(e) => setZoomLevel(parseInt(e.target.value))}
+            className="w-24 h-1 bg-gray-200 rounded-full appearance-none cursor-pointer accent-gray-900"
             title="Timeline zoom"
           />
+          <span className="text-[10px] font-mono text-gray-400 w-8">{zoomLevel}%</span>
         </div>
       </div>
     </div>

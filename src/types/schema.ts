@@ -2,6 +2,7 @@ import { Milliseconds, Pixels } from './units';
 import { ProjectId, AssetId, TrackId, ClipId } from './identifiers';
 
 export type SidebarTab = 'assets' | 'text' | 'captions' | 'layers';
+export type TrackType = 'video' | 'audio' | 'captions';
 
 export interface Resolution {
   width: Pixels;

@@ -3,7 +3,12 @@
 import { useState } from 'react';
 import { useEditorStore } from '@/store/useEditorStore';
 import { useProjectStore } from '@/store/useProjectStore';
-import { X, Upload, Film, Music, AlignLeft, AlignCenter, AlignRight, ChevronRight, Mic } from 'lucide-react';
+import { X, Upload, Film, Music, AlignLeft, AlignCenter, AlignRight, ChevronRight, Mic, Plus } from 'lucide-react';
+import { mediaService } from '@/lib/media/MediaService';
+import { ms } from '@/types/units';
+import { generateId } from '@/lib/utils/ids';
+import { AssetId, ClipId, ProjectId } from '@/types/identifiers';
+import { Asset } from '@/types/schema';
 
 export default function SecondarySidebar() {
   const { activeTab, isSidebarOpen, setIsSidebarOpen } = useEditorStore();
@@ -41,10 +46,71 @@ export default function SecondarySidebar() {
 type AssetFilter = 'all' | 'video' | 'audio';
 
 function AssetsPanel() {
-  const { assets } = useProjectStore();
+  const { assets, id: projectId, addAsset, addClip } = useProjectStore();
+  const { setSelectedClipId } = useEditorStore();
   const [filter, setFilter] = useState<AssetFilter>('all');
+  const [isImporting, setIsImporting] = useState(false);
+  const [verifyingIds, setVerifyingIds] = useState<Set<string>>(new Set());
 
   const filtered = assets.filter(a => filter === 'all' || a.type === filter);
+
+  const handleImport = async () => {
+    setIsImporting(true);
+    try {
+      const result = await mediaService.pickMedia();
+      if (!result) return;
+
+      const { handle, metadata } = result;
+      const assetId = generateId('asset') as AssetId;
+
+      await addAsset({
+        id: assetId,
+        handle,
+        ...metadata,
+      });
+    } catch (err) {
+      console.error('Import failed:', err);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleVerify = async (asset: Asset) => {
+    if (!asset.handle) return;
+    setVerifyingIds(prev => new Set(prev).add(asset.id));
+    try {
+      const granted = await mediaService.verifyPermission(asset.handle, true);
+      if (granted) {
+        // We might want to trigger a metadata re-scan or just force a re-render
+        console.log('Permission granted for', asset.name);
+      }
+    } catch (err) {
+      console.error('Verification failed:', err);
+    } finally {
+      setVerifyingIds(prev => {
+        const next = new Set(prev);
+        next.delete(asset.id);
+        return next;
+      });
+    }
+  };
+
+  const handleAddToTimeline = (asset: Asset) => {
+    const trackType = asset.type === 'video' ? 'video' : 'audio';
+    const targetTrack = useProjectStore.getState().tracks.find(t => t.type === trackType);
+    
+    if (targetTrack) {
+      const clipId = generateId('clip') as ClipId;
+      addClip(targetTrack.id, {
+        id: clipId,
+        assetId: asset.id,
+        startTime: ms(0), // Default to start for now
+        duration: asset.duration,
+        assetOffset: ms(0),
+      });
+      setSelectedClipId(clipId);
+    }
+  };
 
   const filters: { id: AssetFilter; label: string }[] = [
     { id: 'all',   label: 'All' },
@@ -53,7 +119,7 @@ function AssetsPanel() {
   ];
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-white">
       {/* Filter row */}
       <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-1">
         {filters.map(f => (
@@ -70,43 +136,82 @@ function AssetsPanel() {
           </button>
         ))}
         <button
-          className="ml-auto p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+          onClick={handleImport}
+          disabled={isImporting}
+          className="ml-auto p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors disabled:opacity-50"
           title="Import media"
         >
-          <Upload size={14} />
+          {isImporting ? <div className="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" /> : <Upload size={14} />}
         </button>
       </div>
 
       {/* Asset list */}
       <div className="flex-1 overflow-y-auto">
         {filtered.length === 0 ? (
-          <div className="px-4 py-8 text-center">
-            <p className="text-xs text-gray-400">No {filter} files linked to this project.</p>
-            <button className="mt-3 text-xs font-semibold text-red-700 underline underline-offset-2 hover:text-red-800">
-              Import one
+          <div className="px-4 py-12 text-center">
+            <div className="w-12 h-12 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-3 text-gray-300">
+              <Film size={20} />
+            </div>
+            <p className="text-xs font-medium text-gray-900">No {filter} files</p>
+            <p className="text-[10px] text-gray-400 mt-1 max-w-[160px] mx-auto">
+              Link your local video and audio files to start editing.
+            </p>
+            <button 
+              onClick={handleImport}
+              className="mt-4 text-[11px] font-bold py-2 px-6 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors"
+            >
+              Import Files
             </button>
           </div>
         ) : (
           <ul className="divide-y divide-gray-100">
-            {filtered.map(asset => (
-              <li
-                key={asset.id}
-                className="group flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-grab active:cursor-grabbing transition-colors"
-              >
-                <div className={`flex-shrink-0 p-1.5 rounded-md ${
-                  asset.type === 'video'
-                    ? 'bg-orange-100 text-orange-600'
-                    : 'bg-sky-100 text-sky-600'
-                }`}>
-                  {asset.type === 'video' ? <Film size={14} /> : <Music size={14} />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-gray-900 truncate">{asset.name}</p>
-                  <p className="text-[10px] text-gray-400 font-mono">{(asset.duration / 1000).toFixed(1)}s</p>
-                </div>
-                <ChevronRight size={12} className="text-gray-300 opacity-0 group-hover:opacity-100 flex-shrink-0 transition-opacity" />
-              </li>
-            ))}
+            {filtered.map(asset => {
+              const isVerifying = verifyingIds.has(asset.id);
+              return (
+                <li
+                  key={asset.id}
+                  className="group relative flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors cursor-default"
+                >
+                  <div className={`flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center border ${
+                    asset.type === 'video'
+                      ? 'bg-orange-50 border-orange-100 text-orange-600'
+                      : 'bg-sky-50 border-sky-100 text-sky-600'
+                  }`}>
+                    {asset.type === 'video' ? <Film size={16} /> : <Music size={16} />}
+                  </div>
+                  
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-gray-900 truncate pr-4">{asset.name}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[10px] text-gray-400 font-mono">{(asset.duration / 1000).toFixed(1)}s</span>
+                      <span className="text-[10px] text-gray-300">•</span>
+                      <span className="text-[10px] text-gray-400 uppercase tracking-tighter">{(asset.size / 1024 / 1024).toFixed(1)} MB</span>
+                    </div>
+                  </div>
+
+                  {/* Actions overlay */}
+                  <div className="absolute inset-y-0 right-3 flex items-center opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-l from-gray-50 via-gray-50 pl-4">
+                    <button
+                      onClick={() => handleAddToTimeline(asset)}
+                      title="Add to timeline"
+                      className="p-1.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
+
+                  {/* Unlock warning (simplified for now, real check later) */}
+                  {!asset.handle && (
+                    <button 
+                      onClick={() => handleVerify(asset)}
+                      className="absolute inset-0 bg-white/80 backdrop-blur-[1px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <span className="text-[10px] font-bold text-red-700 bg-red-50 px-2 py-1 rounded border border-red-100">Unlock permissions</span>
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

@@ -17,7 +17,7 @@ export default function EditorPage() {
   const projectId = params.projectId as string;
   
   const { name: projectName, loadProject } = useProjectStore();
-  const isSidebarOpen = useEditorStore(s => s.isSidebarOpen);
+  const { isSidebarOpen } = useEditorStore();
 
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);

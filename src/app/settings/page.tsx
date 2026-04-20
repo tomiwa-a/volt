@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useAppStore, Theme, ExportFormat, Resolution, FrameRate } from '@/store/useAppStore';
+import { useSettingsStore, Theme, ExportFormat, Resolution, FrameRate } from '@/store/useSettingsStore';
+import { useEditorStore } from '@/store/useEditorStore';
+import { useProjectStore } from '@/store/useProjectStore';
 import { engine } from '@/lib/engine/EngineService';
 import {
   SlidersHorizontal,
@@ -78,7 +80,7 @@ function GeneralSettings() {
     exportFormat, setExportFormat, 
     resolution, setResolution, 
     frameRate, setFrameRate 
-  } = useAppStore();
+  } = useSettingsStore();
 
   return (
     <div className="space-y-8">

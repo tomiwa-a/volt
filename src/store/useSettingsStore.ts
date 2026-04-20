@@ -6,20 +6,19 @@ export type ExportFormat = 'mp4' | 'webm';
 export type Resolution = '720p' | '1080p' | '4k';
 export type FrameRate = '24' | '30' | '60';
 
-interface AppState {
+interface SettingsState {
   theme: Theme;
   exportFormat: ExportFormat;
   resolution: Resolution;
   frameRate: FrameRate;
   
-  // Actions
   setTheme: (theme: Theme) => void;
   setExportFormat: (format: ExportFormat) => void;
   setResolution: (res: Resolution) => void;
   setFrameRate: (fps: FrameRate) => void;
 }
 
-export const useAppStore = create<AppState>()(
+export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
       theme: 'light',
@@ -33,7 +32,7 @@ export const useAppStore = create<AppState>()(
       setFrameRate: (frameRate) => set({ frameRate }),
     }),
     {
-      name: 'volt-app-settings',
+      name: 'volt-settings', // name of the item in storage (must be unique)
     }
   )
 );
