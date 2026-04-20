@@ -16,7 +16,7 @@ export default function EditorPage() {
   const projectName = 'Summer Vlog 2026'; // TODO: Fetch from IndexedDB
 
   return (
-    <main className="flex h-screen w-full flex-col overflow-hidden bg-zinc-950 text-white">
+    <main className="flex h-screen w-full flex-col overflow-hidden bg-gray-50 text-gray-900">
       <EditorHeader
         projectName={projectName}
         onBack={() => router.push('/')}
@@ -32,8 +32,8 @@ export default function EditorPage() {
         </div>
 
         {/* Right Panel (Sidebar Content) - TODO */}
-        <div className="w-64 border-l border-zinc-800 bg-zinc-900/50 p-4 overflow-y-auto hidden">
-          <div className="text-xs text-zinc-500">
+        <div className="w-64 border-l border-gray-200 bg-white p-4 overflow-y-auto hidden">
+          <div className="text-xs text-gray-500">
             {activeTab === 'layers' && <p>Layers panel</p>}
             {activeTab === 'uploads' && <p>Uploads panel</p>}
             {activeTab === 'captions' && <p>Captions panel</p>}

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Plus, MoreVertical, Calendar, Clock } from 'lucide-react';
+import { Plus, MoreVertical, Calendar, Film } from 'lucide-react';
+import Link from 'next/link';
 
 interface Project {
   id: string;
@@ -41,80 +42,84 @@ export default function ProjectDashboard() {
   };
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-white">
+    <main className="min-h-screen bg-gray-50 text-gray-900 font-sans selection:bg-red-100">
       {/* Header */}
-      <header className="border-b border-zinc-800 px-8 py-6">
-        <div className="max-w-7xl mx-auto">
-          <h1 className="text-3xl font-bold tracking-tight">Projects</h1>
-          <p className="text-zinc-400 mt-2">Create or open a project to begin editing</p>
+      <header className="border-b border-gray-200 bg-white px-8 py-5 sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-red-700">
+              <Film size={18} className="text-white" />
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">Projects</h1>
+          </div>
+          <button
+            onClick={handleNewProject}
+            className="flex items-center justify-center gap-2 rounded-md bg-red-700 hover:bg-red-800 px-5 py-2.5 text-sm font-medium text-white"
+          >
+            <Plus size={18} />
+            New Project
+          </button>
         </div>
       </header>
 
       {/* Projects Grid */}
-      <div className="px-8 py-8">
+      <div className="px-8 py-10">
         <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* New Project Card */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            
+            {/* New Project Card Trigger */}
             <button
               onClick={handleNewProject}
-              className="group relative h-64 rounded-lg border-2 border-dashed border-zinc-700 bg-zinc-900/50 hover:border-blue-500 hover:bg-zinc-900/80 transition-all flex items-center justify-center cursor-pointer"
+              className="group h-56 rounded-lg border border-dashed border-gray-300 hover:border-red-700 hover:bg-red-50 hover:text-red-700 flex items-center justify-center cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-red-700 focus-visible:ring-offset-2"
             >
-              <div className="flex flex-col items-center gap-3 group-hover:gap-4 transition-all">
-                <div className="p-3 rounded-lg bg-blue-600/20 group-hover:bg-blue-600/30 transition-colors">
-                  <Plus size={28} className="text-blue-400 group-hover:text-blue-300" />
-                </div>
-                <div>
-                  <p className="font-semibold text-white">New Project</p>
-                  <p className="text-sm text-zinc-400">Select a video file</p>
+              <div className="flex flex-col items-center gap-3 text-gray-500 group-hover:text-red-700">
+                <Plus size={24} />
+                <div className="text-center font-medium">
+                  Create New
                 </div>
               </div>
             </button>
 
             {/* Existing Projects */}
             {projects.map((project) => (
-              <a
+              <Link
                 key={project.id}
                 href={`/editor/${project.id}`}
-                className="group relative h-64 rounded-lg border border-zinc-700 bg-zinc-900 overflow-hidden hover:border-zinc-600 transition-all hover:shadow-lg hover:shadow-blue-500/10"
+                className="group h-56 rounded-lg border border-gray-200 bg-white overflow-hidden hover:border-gray-300 outline-none focus-visible:ring-2 focus-visible:ring-red-700 flex flex-col"
               >
-                {/* Thumbnail */}
-                <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 to-purple-600/10 flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="w-12 h-12 rounded-full bg-blue-600/20 mx-auto mb-2 flex items-center justify-center">
-                      <span className="text-lg font-bold text-blue-400">▶</span>
-                    </div>
+                {/* Thumbnail Area - Minimal, flat */}
+                <div className="relative flex-1 bg-gray-100 border-b border-gray-100 flex items-center justify-center group-hover:bg-gray-50">
+                  <Film size={32} className="text-gray-300 group-hover:text-red-600" />
+                  
+                  {/* Duration pill */}
+                  <div className="absolute bottom-2 right-2 bg-gray-900/70 px-2 py-0.5 rounded text-[11px] font-mono font-medium text-white">
+                    {project.duration}
                   </div>
                 </div>
 
-                {/* Content */}
-                <div className="absolute inset-0 flex flex-col justify-between p-4 bg-gradient-to-t from-black via-transparent to-transparent">
-                  <div className="flex justify-between items-start">
-                    <h3 className="font-semibold text-white line-clamp-2 group-hover:text-blue-300 transition-colors">
+                {/* Info Area */}
+                <div className="p-4 bg-white">
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="font-medium text-gray-900 truncate pr-4 group-hover:text-red-700">
                       {project.name}
                     </h3>
                     <button
-                      className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-zinc-800 transition-all"
+                      className="p-1 -mr-1 rounded text-gray-400 opacity-0 group-hover:opacity-100 hover:bg-gray-100 hover:text-gray-700"
                       onClick={(e) => {
                         e.preventDefault();
-                        // TODO: Show context menu
+                        e.stopPropagation();
                       }}
                     >
                       <MoreVertical size={16} />
                     </button>
                   </div>
 
-                  <div className="space-y-2 text-xs text-zinc-400">
-                    <div className="flex items-center gap-2">
-                      <Calendar size={14} />
-                      {project.lastEdited}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Clock size={14} />
-                      {project.duration}
-                    </div>
+                  <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                    <Calendar size={12} className="opacity-70" />
+                    Edited {project.lastEdited}
                   </div>
                 </div>
-              </a>
+              </Link>
             ))}
           </div>
         </div>
