@@ -17,6 +17,7 @@ let activeLoadId = 0;
 let pendingSeekMs: Milliseconds | null = null;
 
 let currentSeekId = 0;
+let seekTargetTimestamp = 0;
 let seekFrameTotal = 0;
 let seekFrameDecoded = 0;
 
@@ -138,6 +139,12 @@ async function seekTo(timeMs: Milliseconds, requestSeekId?: number) {
     targetIndex = i;
   }
 
+  seekTargetTimestamp = samples[targetIndex].cts * (1000000 / timescale);
+
+  if (frameBuffer) {
+    frameBuffer.clear(); // Clear old frames from previous scrub
+  }
+
   let keyIndex = targetIndex;
   while (keyIndex > 0 && !samples[keyIndex].is_sync) {
     keyIndex--;
@@ -146,63 +153,28 @@ async function seekTo(timeMs: Milliseconds, requestSeekId?: number) {
   if (seekId !== currentSeekId) return;
   console.log(`[DecoderWorker] [${seekId}] Found target frame at index ${targetIndex}, keyframe at index ${keyIndex}`);
 
-  if (decoder) {
-    try { decoder.close(); } catch (_) {}
+  // Setup the persistent decoder if it doesn't exist
+  ensureDecoder();
+
+  // Reset the decoder to clear any pending frames from previous seeks/pre-buffering
+  try {
+    decoder?.reset();
+    configureDecoder();
+  } catch (e) {
+    console.error(`[DecoderWorker] [${seekId}] Decoder reset/reconfig failed:`, e);
+    decoder?.close();
     decoder = null;
+    ensureDecoder();
   }
 
   seekFrameTotal = targetIndex - keyIndex + 1;
   seekFrameDecoded = 0;
 
-  // Always create a fresh decoder so the output closure captures the CURRENT seekId.
-  // Reusing via reset() causes a stale-closure bug where all frames get discarded.
-  decoder = new VideoDecoder({
-    output: (frame) => {
-      if (seekId !== currentSeekId) {
-        frame.close();
-        return;
-      }
-
-      if (frameBuffer) {
-        const writeIndex = frameBuffer.getWriteIndex();
-        if (writeIndex !== null) {
-          const pixels = frameBuffer.getWriteBuffer(writeIndex);
-          if (pixels) {
-            const frameTimeMs = (frame.timestamp / 1000) as Milliseconds;
-            frame.copyTo(pixels, { format: 'RGBA' }).then(() => {
-              frameBuffer?.commitWrite(frameTimeMs);
-              ctx.postMessage({ type: 'BUFFER_READY', payload: { timeMs: frameTimeMs, index: writeIndex, seekId } });
-              frame.close();
-            }).catch((err) => {
-              console.error(`[DecoderWorker] [${seekId}] copyTo error:`, err);
-              frame.close();
-            });
-            return;
-          }
-        }
-      }
-
-      // Fallback to ImageBitmap if buffer is full or unavailable
-      createImageBitmap(frame).then(bitmap => {
-        ctx.postMessage({ type: 'FRAME', payload: { bitmap, timeMs: (frame.timestamp / 1000) } }, [bitmap]);
-        frame.close();
-      });
-    },
-    error: (e) => console.error(`[DecoderWorker] [${seekId}] Decode error:`, e)
-  });
-
-  decoder.configure({
-    codec: videoTrack.codec,
-    codedWidth: videoTrack.video.width,
-    codedHeight: videoTrack.video.height,
-    description: getExtraData(mp4boxFile)
-  });
-
   // Start decoding from keyframe to target
   for (let i = keyIndex; i <= targetIndex; i++) {
     if (seekId !== currentSeekId) break;
     const s = samples[i];
-    decoder.decode(new EncodedVideoChunk({
+    decoder?.decode(new EncodedVideoChunk({
       type: s.is_sync ? 'key' : 'delta',
       timestamp: s.cts * (1000000 / timescale),
       duration: s.duration * (1000000 / timescale),
@@ -210,13 +182,12 @@ async function seekTo(timeMs: Milliseconds, requestSeekId?: number) {
     }));
   }
 
-  // Pre-buffer: Continue decoding after the target
-  // We'll decode a decent headless chunk (e.g. 60 frames or ~1 second)
+  // Pre-buffer logic (60 frames ahead)
   const prebufferCount = 60;
   for (let i = targetIndex + 1; i < Math.min(samples.length, targetIndex + 1 + prebufferCount); i++) {
     if (seekId !== currentSeekId) break;
     const s = samples[i];
-    decoder.decode(new EncodedVideoChunk({
+    decoder?.decode(new EncodedVideoChunk({
       type: s.is_sync ? 'key' : 'delta',
       timestamp: s.cts * (1000000 / timescale),
       duration: s.duration * (1000000 / timescale),
@@ -226,13 +197,76 @@ async function seekTo(timeMs: Milliseconds, requestSeekId?: number) {
 
   if (seekId === currentSeekId) {
     try {
-      await decoder.flush();
+      await decoder?.flush();
     } catch (err) {
       if (seekId === currentSeekId) {
         console.error(`[DecoderWorker] [${seekId}] Flush error:`, err);
       }
     }
   }
+}
+
+function ensureDecoder() {
+  if (decoder) return;
+
+  decoder = new VideoDecoder({
+    output: (frame) => {
+      // Discard intermediate delta frames that are only needed to reconstruct the target frame
+      if (frame.timestamp < seekTargetTimestamp) {
+        frame.close();
+        return;
+      }
+
+      const isTarget = frame.timestamp === seekTargetTimestamp;
+
+      if (frameBuffer) {
+        const writeIndex = frameBuffer.reserveWriteSlot();
+        if (writeIndex !== null) {
+          const pixels = frameBuffer.getWriteBuffer(writeIndex);
+          if (pixels) {
+            const frameTimeMs = (frame.timestamp / 1000) as Milliseconds;
+            frame.copyTo(pixels, { format: 'RGBA' }).then(() => {
+              frameBuffer?.commitWrite(frameTimeMs);
+              
+              if (isTarget) {
+                ctx.postMessage({ type: 'TARGET_READY', payload: { timeMs: frameTimeMs, index: writeIndex, seekId: currentSeekId } });
+              } else {
+                ctx.postMessage({ type: 'PREBUFFERED', payload: {} }); // Just an update, UI doesn't render it
+              }
+              frame.close();
+            }).catch((err) => {
+              console.error(`[DecoderWorker] [${currentSeekId}] copyTo error:`, err);
+              frame.close();
+            });
+            return;
+          }
+        }
+      }
+
+      // If buffer is full or missing, only fallback to ImageBitmap for the target frame (don't flood UI)
+      if (isTarget) {
+        createImageBitmap(frame).then(bitmap => {
+          ctx.postMessage({ type: 'FRAME', payload: { bitmap, timeMs: (frame.timestamp / 1000) } }, [bitmap]);
+          frame.close();
+        });
+      } else {
+        frame.close();
+      }
+    },
+    error: (e) => console.error(`[DecoderWorker] Global Decode error:`, e)
+  });
+
+  configureDecoder();
+}
+
+function configureDecoder() {
+  if (!decoder || !videoTrack) return;
+  decoder.configure({
+    codec: videoTrack.codec,
+    codedWidth: videoTrack.video.width,
+    codedHeight: videoTrack.video.height,
+    description: getExtraData(mp4boxFile)
+  });
 }
 
 /** Extract AVC/HEVC/VP9 codec configuration from the MP4 container. */

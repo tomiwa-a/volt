@@ -30,30 +30,32 @@ class EngineService {
 
   private constructor() {
     if (typeof window !== 'undefined') {
-      // Initialize the shared frame buffer
       this.frameBuffer = new FrameBufferManager();
 
-      // Initialize the decoder worker
+      // Log hardware profile for reference (multi-worker pool coming in next phase)
+      const cores = navigator.hardwareConcurrency || 4;
+      const memory = (navigator as any).deviceMemory || 4;
+      console.log(`[Engine] Optimized for: 1 Worker (Cores: ${cores}, RAM: ${memory}GB) | Pool coming in next phase`);
+
       this.worker = new Worker(new URL('./VideoDecoderWorker.ts', import.meta.url), { type: 'module' });
       
       this.worker.onmessage = (e) => {
         const { type, payload } = e.data;
         if (type === 'FRAME' && this.onFrameCallback) {
-          // Fallback for legacy ImageBitmap path
           this.onFrameCallback(payload.bitmap);
         }
-        if (type === 'BUFFER_READY' && this.onFrameCallback && this.frameBuffer) {
-          // Record frame arrival for latency tracking using the correlated seekId
+        if (type === 'TARGET_READY' && this.onFrameCallback && this.frameBuffer) {
           telemetry.recordFrameReady(payload.seekId || payload.timeMs);
           telemetry.recordBufferCount(this.frameBuffer.getStats().count);
 
-          // New SharedArrayBuffer path
           const pixels = this.frameBuffer.getFrameAt(payload.timeMs);
           if (pixels) {
             this.onFrameCallback(pixels);
-            // Re-release the slot after the UI has processed it
-            this.frameBuffer.advance(1);
+            this.frameBuffer.advance(1); // Consume the frame we just drew
           }
+        }
+        if (type === 'PREBUFFERED' && this.frameBuffer) {
+          telemetry.recordBufferCount(this.frameBuffer.getStats().count);
         }
       };
     }
@@ -70,7 +72,6 @@ class EngineService {
    * Initializes the decoder for a specific file.
    */
   public async loadFile(file: File) {
-    // Deduplicate: ignore if already loading this exact file
     const key = `${file.name}-${file.size}-${file.lastModified}`;
     if (key === this.activeFileKey) return;
     this.activeFileKey = key;

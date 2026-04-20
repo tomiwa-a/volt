@@ -55,16 +55,18 @@ export class FrameBufferManager {
   private static FIXED_STRIDE = 1920 * 1080 * 4;
 
   /**
-   * Worker: Get the next slot index to write into.
-   * Blocks if buffer is full.
+   * Worker: Atomically reserve the next available slot index to write into.
+   * Returns the reserved index, or null if the buffer is full.
    */
-  public getWriteIndex(): number | null {
-    const head = Atomics.load(this.header, FrameBufferManager.HEAD);
+  public reserveWriteSlot(): number | null {
     const count = Atomics.load(this.header, FrameBufferManager.COUNT);
     const capacity = Atomics.load(this.header, FrameBufferManager.CAPACITY);
 
     if (count >= capacity) return null;
-    return head;
+
+    // Atomically increment the HEAD for this worker's reservation
+    const reservedIndex = Atomics.add(this.header, FrameBufferManager.HEAD, 1);
+    return reservedIndex % capacity;
   }
 
   /**
@@ -79,15 +81,9 @@ export class FrameBufferManager {
    * Worker: Mark a frame as committed to the buffer.
    */
   public commitWrite(timeMs: number) {
-    const head = Atomics.load(this.header, FrameBufferManager.HEAD);
-    const count = Atomics.load(this.header, FrameBufferManager.COUNT);
-    const capacity = Atomics.load(this.header, FrameBufferManager.CAPACITY);
-
-    // Update pointers
-    Atomics.store(this.header, FrameBufferManager.HEAD, (head + 1) % capacity);
+    // HEAD was already advanced atomically in reserveWriteSlot().
+    // We only need to increment COUNT to signal the frame is ready for the UI.
     Atomics.add(this.header, FrameBufferManager.COUNT, 1);
-    
-    // Signal UI
     Atomics.notify(this.header, FrameBufferManager.COUNT);
   }
 
