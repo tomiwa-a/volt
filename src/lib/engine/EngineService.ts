@@ -17,20 +17,35 @@ declare global {
   }
 }
 
+import { FrameBufferManager } from './FrameBuffer';
+
 class EngineService {
   private static instance: EngineService;
   private worker: Worker | null = null;
-  private onFrameCallback: ((bitmap: ImageBitmap) => void) | null = null;
+  private onFrameCallback: ((bitmap: ImageBitmap | Uint8ClampedArray) => void) | null = null;
+  private frameBuffer: FrameBufferManager | null = null;
 
   private constructor() {
     if (typeof window !== 'undefined') {
+      // Initialize the shared frame buffer
+      this.frameBuffer = new FrameBufferManager();
+
       // Initialize the decoder worker
-      this.worker = new Worker(new URL('./VideoDecoderWorker.ts', import.meta.url));
+      this.worker = new Worker(new URL('./VideoDecoderWorker.ts', import.meta.url), { type: 'module' });
       
       this.worker.onmessage = (e) => {
         const { type, payload } = e.data;
         if (type === 'FRAME' && this.onFrameCallback) {
+          // Fallback for legacy ImageBitmap path
           this.onFrameCallback(payload.bitmap);
+        }
+        if (type === 'BUFFER_READY' && this.onFrameCallback && this.frameBuffer) {
+          // New SharedArrayBuffer path
+          const pixels = this.frameBuffer.getFrameAt(payload.timeMs);
+          if (pixels) {
+            this.onFrameCallback(pixels);
+            // We can advance the buffer here or after rendering
+          }
         }
       };
     }
@@ -47,7 +62,14 @@ class EngineService {
    * Initializes the decoder for a specific file.
    */
   public async loadFile(file: File) {
-    this.worker?.postMessage({ type: 'INIT', payload: { file } });
+    this.frameBuffer?.clear();
+    this.worker?.postMessage({ 
+      type: 'INIT', 
+      payload: { 
+        file,
+        sharedBuffer: this.frameBuffer?.getBuffer()
+      } 
+    });
   }
 
   /**
@@ -60,12 +82,18 @@ class EngineService {
   /**
    * Register a callback for when a new frame is decoded.
    */
-  public onFrame(callback: (bitmap: ImageBitmap) => void) {
+  public onFrame(callback: (bitmap: ImageBitmap | Uint8ClampedArray) => void) {
     this.onFrameCallback = callback;
   }
 
   // Placeholder methods for UI compatibility during transition
-  public getStats() { return { status: 'decoding', version: '0.1.0' }; }
+  public getStats() { 
+    return { 
+      status: 'decoding', 
+      version: '0.1.0',
+      buffer: this.frameBuffer?.getStats()
+    }; 
+  }
   public render(index: number) { return null; }
   public async init() { return Promise.resolve(); }
 }

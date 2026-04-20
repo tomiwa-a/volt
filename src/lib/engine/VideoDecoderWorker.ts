@@ -1,14 +1,16 @@
 /// <reference lib="webworker" />
 
+import { FrameBufferManager } from './FrameBuffer';
+import MP4Box from 'mp4box';
+
 type Milliseconds = number & { readonly __brand: 'ms' };
 
 const ctx: Worker = self as any;
 
-importScripts('https://unpkg.com/mp4box@0.5.2/dist/mp4box.all.js');
-
 let mp4boxFile: any;
 let videoTrack: any;
 let decoder: VideoDecoder | null = null;
+let frameBuffer: FrameBufferManager | null = null;
 
 let samples: any[] = [];
 let activeLoadId = 0;
@@ -24,6 +26,9 @@ ctx.onmessage = async (e) => {
     case 'INIT':
       console.log(`[DecoderWorker] INIT received for file: ${payload.file.name}`);
       activeLoadId++;
+      if (payload.sharedBuffer) {
+        frameBuffer = new FrameBufferManager(payload.sharedBuffer);
+      }
       await initFile(payload.file, activeLoadId);
       break;
 
@@ -45,7 +50,7 @@ async function initFile(file: File, loadId: number) {
     decoder = null;
   }
 
-  // @ts-ignore - MP4Box is global from importScripts
+  // @ts-ignore
   mp4boxFile = MP4Box.createFile();
 
   mp4boxFile.onReady = (info: any) => {
@@ -145,6 +150,23 @@ async function seekTo(timeMs: Milliseconds) {
 
       if (seekFrameDecoded === seekFrameTotal) {
         console.log(`[DecoderWorker] Emitting target frame for ${timeMs}ms`);
+
+        if (frameBuffer) {
+          const writeIndex = frameBuffer.getWriteIndex();
+          if (writeIndex !== null) {
+            const pixels = frameBuffer.getFrameAt(timeMs);
+            if (pixels) {
+              frame.copyTo(pixels).then(() => {
+                frameBuffer?.commitWrite(timeMs);
+                ctx.postMessage({ type: 'BUFFER_READY', payload: { timeMs, index: writeIndex } });
+                frame.close();
+              });
+              return;
+            }
+          }
+        }
+
+        // Fallback to legacy ImageBitmap if no buffer or buffer full
         createImageBitmap(frame).then(bitmap => {
           ctx.postMessage({ type: 'FRAME', payload: { bitmap, timeMs } }, [bitmap]);
           frame.close();
@@ -186,7 +208,7 @@ function getExtraData(file: any) {
   for (const entry of track.mdia.minf.stbl.stsd.entries) {
     if (entry.avcC || entry.hvcC || entry.vpcC) {
       const box = entry.avcC || entry.hvcC || entry.vpcC;
-      const stream = new (globalThis as any).DataStream(undefined, 0, (globalThis as any).DataStream.BIG_ENDIAN);
+      const stream = new (MP4Box as any).DataStream(undefined, 0, (MP4Box as any).DataStream.BIG_ENDIAN);
       box.write(stream);
       return new Uint8Array(stream.buffer, 8);
     }

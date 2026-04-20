@@ -23,6 +23,7 @@ export default function Canvas({ projectName }: CanvasProps) {
   }, 0);
   const projectDuration = Math.max(calculatedDuration, 30000);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const [needsPermission, setNeedsPermission] = useState(false);
   const [hasFrame, setHasFrame] = useState(false);
 
@@ -58,13 +59,27 @@ export default function Canvas({ projectName }: CanvasProps) {
   };
 
   useEffect(() => {
-    engine.onFrame((bitmap) => {
+    if (canvasRef.current) {
+      ctxRef.current = canvasRef.current.getContext('2d', { alpha: false });
+    }
+  }, []);
+
+  useEffect(() => {
+    engine.onFrame((data) => {
+      if (!canvasRef.current || !ctxRef.current) return;
       const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      const ctx = ctxRef.current;
       setHasFrame(true);
+
+      if (data instanceof ImageBitmap) {
+        ctx.drawImage(data, 0, 0, canvas.width, canvas.height);
+        data.close();
+      } else {
+        // Raw pixels from SharedArrayBuffer
+        // We cast to any to bypass TS strictly checking for non-shared ArrayBuffer
+        const imageData = new ImageData(data as any, resolution.width, resolution.height);
+        ctx.putImageData(imageData, 0, 0);
+      }
     });
   }, []);
 

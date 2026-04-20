@@ -44,7 +44,7 @@ export default function Timeline({ projectName }: TimelineProps) {
   const { tracks, fps, assets } = useProjectStore();
 
   const [mutedTracks, setMutedTracks] = useState<Set<string>>(new Set());
-  const [engineStatus, setEngineStatus] = useState('initializing');
+  const [engineStats, setEngineStats] = useState<any>({ status: 'initializing' });
 
   const getTimeFromX = useCallback((clientX: number) => {
     if (!trackAreaRef.current) return ms(0);
@@ -121,9 +121,9 @@ export default function Timeline({ projectName }: TimelineProps) {
       const interval = setInterval(() => {
         const stats = engine.getStats();
         if (stats) {
-          setEngineStatus(stats.status);
+          setEngineStats(stats);
         }
-      }, 1000);
+      }, 500);
       return () => clearInterval(interval);
     }
   }, [showStats]);
@@ -247,11 +247,10 @@ export default function Timeline({ projectName }: TimelineProps) {
       {showStats && !isCollapsed && (
         <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center gap-6 flex-shrink-0">
           {[
-            ['Frame', '0 / 22,620'],
-            ['Decode', '2.1 ms'],
-            ['Composite', '0.8 ms'],
-            ['Buffer', '64 MB'],
-            ['Engine', engineStatus],
+            ['Frame', `${Math.floor((Number(currentTime) / 1000) * fps)}`],
+            ['Buffer', `${engineStats.buffer?.count || 0} / ${engineStats.buffer?.capacity || 0} frames`],
+            ['Size', engineStats.buffer ? `${engineStats.buffer.width}x${engineStats.buffer.height}` : '-'],
+            ['Engine', engineStats.status],
             ['SAB', 'active'],
           ].map(([label, val]) => (
             <div key={label} className="flex items-center gap-1.5">
