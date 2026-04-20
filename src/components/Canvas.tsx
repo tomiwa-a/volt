@@ -1,30 +1,53 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { useProjectStore } from '@/store/useProjectStore';
 import { useEditorStore } from '@/store/useEditorStore';
 import { engine } from '@/lib/engine/EngineService';
+import { mediaService } from '@/lib/media/MediaService';
 import { formatTimecode } from '@/lib/utils/timecode';
-import { AlignCenter, Type as TextIcon, RotateCw } from 'lucide-react';
+import { AlignCenter, Type as TextIcon, RotateCw, Lock, ShieldAlert } from 'lucide-react';
 
 interface CanvasProps {
   projectName: string;
 }
 
 export default function Canvas({ projectName }: CanvasProps) {
-  const { resolution, fps, assets, tracks } = useProjectStore();
+  const { resolution, fps, assets } = useProjectStore();
   const { currentTime, duration } = useEditorStore();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [needsPermission, setNeedsPermission] = useState(false);
 
   const aspectRatio = Number(resolution.width) / Number(resolution.height);
 
-  useEffect(() => {
+  const loadMediaToEngine = async () => {
     const firstVideo = assets.find(a => a.type === 'video');
-    if (firstVideo?.handle) {
-      firstVideo.handle.getFile().then(file => {
-        engine.loadFile(file);
-        engine.seek(Number(currentTime));
-      });
+    if (!firstVideo?.handle) return;
+
+    try {
+      const file = await firstVideo.handle.getFile();
+      await engine.loadFile(file);
+      engine.seek(Number(currentTime));
+      setNeedsPermission(false);
+    } catch (err) {
+      if ((err as Error).name === 'NotAllowedError') {
+        setNeedsPermission(true);
+      }
+      console.warn('[Canvas] Auto-load failed:', err);
     }
+  };
+
+  useEffect(() => {
+    loadMediaToEngine();
   }, [assets]);
+
+  const handleReconnect = async () => {
+    const firstVideo = assets.find(a => a.type === 'video');
+    if (!firstVideo?.handle) return;
+
+    const granted = await mediaService.verifyPermission(firstVideo.handle, true);
+    if (granted) {
+      loadMediaToEngine();
+    }
+  };
 
   useEffect(() => {
     engine.onFrame((bitmap) => {
@@ -58,6 +81,28 @@ export default function Canvas({ projectName }: CanvasProps) {
             height={resolution.height}
             className="w-full h-full bg-black block" 
           />
+
+          {/* Permission Fallback UI */}
+          {needsPermission && (
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-gray-900/40 backdrop-blur-[2px] animate-in fade-in duration-500">
+              <div className="bg-white rounded-2xl shadow-2xl p-6 flex flex-col items-center max-w-xs text-center border border-gray-100">
+                <div className="w-12 h-12 bg-orange-50 rounded-full flex items-center justify-center mb-4">
+                  <Lock size={22} className="text-orange-600" />
+                </div>
+                <h3 className="text-sm font-bold text-gray-900 mb-1">Media Access Required</h3>
+                <p className="text-[11px] text-gray-500 mb-6 leading-relaxed">
+                  Browser security requires a manual click to re-open your local files after a refresh.
+                </p>
+                <button
+                  onClick={handleReconnect}
+                  className="w-full py-2.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-gray-800 transition-all flex items-center justify-center gap-2"
+                >
+                  <ShieldAlert size={14} />
+                  Restore Access
+                </button>
+              </div>
+            </div>
+          )}
           <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-white border border-gray-200 rounded-md px-2 py-1 opacity-0 group-hover:opacity-100 z-20 transition-opacity shadow-sm">
             <div className="flex items-center gap-1 border-r border-gray-200 pr-2">
               <TextIcon size={13} className="text-gray-400" />

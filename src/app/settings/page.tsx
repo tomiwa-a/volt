@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSettingsStore, Theme, ExportFormat, Resolution, FrameRate } from '@/store/useSettingsStore';
 import { useEditorStore } from '@/store/useEditorStore';
 import { useProjectStore } from '@/store/useProjectStore';
