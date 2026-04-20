@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useEditorStore } from '@/store/useEditorStore';
 import { useProjectStore } from '@/store/useProjectStore';
 import { engine } from '@/lib/engine/EngineService';
 import { formatTimecode } from '@/lib/utils/timecode';
 import { TrackType, TrackStyle } from '@/types/schema';
 import { ms } from '@/types/units';
+import { msToPx, pxToMs } from '@/lib/utils/coordinates';
 import {
   Play, Pause, SkipBack, SkipForward,
   Rewind, FastForward, Maximize2, ChevronDown, ChevronUp,
@@ -33,13 +34,69 @@ export default function Timeline({ projectName }: TimelineProps) {
     currentTime
   } = useEditorStore();
 
+  // Ref for the track area container to measure mouse positions
+  const trackAreaRef = useRef<HTMLDivElement>(null);
+  const isScrubbingRef = useRef(false);
+  const lastTimeRef = useRef<number | null>(null);
+  const requestRef = useRef<number | undefined>(undefined);
+
   const { tracks, fps, assets } = useProjectStore();
 
   const [mutedTracks, setMutedTracks] = useState<Set<string>>(new Set());
   const [engineStatus, setEngineStatus] = useState('initializing');
 
-  // Scale: 100px = 1 second (1000ms) at 100% zoom
-  const msToPx = (ms: number) => (ms / 1000) * (zoomLevel / 100) * 100;
+  // Utility to calculate time from a clientX coordinate
+  const getTimeFromX = useCallback((clientX: number) => {
+    if (!trackAreaRef.current) return ms(0);
+    const rect = trackAreaRef.current.getBoundingClientRect();
+    const x = clientX - rect.left - 64; // Subtract track label column width
+    return pxToMs(Math.max(0, x), zoomLevel);
+  }, [zoomLevel]);
+
+  // Scrubbing handlers
+  const handleMouseDown = (e: React.MouseEvent) => {
+    isScrubbingRef.current = true;
+    const newTime = getTimeFromX(e.clientX);
+    useEditorStore.getState().setCurrentTime(newTime, fps);
+    
+    // Add global move/up listeners to handle dragging outside the element
+    window.addEventListener('mousemove', handleGlobalMouseMove);
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+  };
+
+  const handleGlobalMouseMove = (e: MouseEvent) => {
+    if (!isScrubbingRef.current) return;
+    const newTime = getTimeFromX(e.clientX);
+    useEditorStore.getState().setCurrentTime(newTime, fps);
+  };
+
+  const handleGlobalMouseUp = () => {
+    isScrubbingRef.current = false;
+    window.removeEventListener('mousemove', handleGlobalMouseMove);
+    window.removeEventListener('mouseup', handleGlobalMouseUp);
+  };
+
+  // Playback Loop
+  const animate = useCallback((time: number) => {
+    if (lastTimeRef.current !== null) {
+      const delta = time - lastTimeRef.current;
+      const state = useEditorStore.getState();
+      
+      if (state.isPlaying) {
+        const nextTime = ms(Number(state.currentTime) + delta);
+        state.setCurrentTime(nextTime, fps);
+      }
+    }
+    lastTimeRef.current = time;
+    requestRef.current = requestAnimationFrame(animate);
+  }, [fps]);
+
+  useEffect(() => {
+    requestRef.current = requestAnimationFrame(animate);
+    return () => {
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+    };
+  }, [animate]);
 
   useEffect(() => {
     if (showStats) {
@@ -67,7 +124,7 @@ export default function Timeline({ projectName }: TimelineProps) {
     return {
       time,
       label: `${Math.floor(time / 1000)}s`,
-      left: msToPx(time)
+      left: msToPx(ms(time), zoomLevel)
     };
   });
 
@@ -161,7 +218,12 @@ export default function Timeline({ projectName }: TimelineProps) {
 
       {/* ── Track area ── */}
       {!isCollapsed && (
-        <div className="flex flex-col relative" style={{ height: 180 }}>
+        <div 
+          ref={trackAreaRef}
+          onMouseDown={handleMouseDown}
+          className="flex flex-col relative select-none" 
+          style={{ height: 180 }}
+        >
           {/* Ruler */}
           <div className="flex-shrink-0 h-6 border-b border-gray-100 bg-gray-50 flex items-center relative overflow-hidden">
             <div className="absolute inset-0 pl-16">
@@ -169,7 +231,7 @@ export default function Timeline({ projectName }: TimelineProps) {
                 <div 
                   key={m.time} 
                   className="absolute top-0 bottom-0 border-l border-gray-200"
-                  style={{ left: m.left }}
+                  style={{ left: msToPx(ms(m.time), zoomLevel) }}
                 >
                   <span className="text-[9px] font-mono text-gray-400 ml-1 mt-1 block">{m.label}</span>
                 </div>
@@ -190,7 +252,7 @@ export default function Timeline({ projectName }: TimelineProps) {
                   {/* Clip area */}
                   <div className="flex-1 relative bg-gray-50 group/track">
                     {/* Grid lines (simplified) */}
-                    <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundSize: `${msToPx(1000)}px 100%`, backgroundImage: 'linear-gradient(to right, #ccc 1px, transparent 1px)' }} />
+                    <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundSize: `${msToPx(ms(1000), zoomLevel)}px 100%`, backgroundImage: 'linear-gradient(to right, #ccc 1px, transparent 1px)' }} />
                     
                     {t.clips.map(clip => {
                       const asset = assets.find(a => a.id === clip.assetId);
@@ -199,8 +261,8 @@ export default function Timeline({ projectName }: TimelineProps) {
                           key={clip.id}
                           className={`absolute inset-y-1 rounded border shadow-sm flex items-center px-2 min-w-[20px] cursor-pointer group/clip ${meta.bg} ${meta.border} transition-transform active:scale-[0.99]`}
                           style={{
-                            left: msToPx(clip.startTime),
-                            width: msToPx(clip.duration),
+                            left: msToPx(clip.startTime, zoomLevel),
+                            width: msToPx(clip.duration, zoomLevel),
                           }}
                         >
                           <span className={`text-[10px] font-bold truncate ${meta.text}`}>
@@ -222,7 +284,7 @@ export default function Timeline({ projectName }: TimelineProps) {
           {/* Current Time Indicator (Playhead) */}
           <div 
             className="absolute top-0 bottom-0 w-px bg-red-600 z-20 pointer-events-none"
-            style={{ left: 64 + msToPx(currentTime) }}
+            style={{ left: 64 + msToPx(currentTime, zoomLevel) }}
           >
             <div className="absolute -top-1 -left-[5px] w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[8px] border-t-red-600" />
           </div>

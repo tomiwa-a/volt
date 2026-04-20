@@ -21,8 +21,8 @@ interface EditorState {
   // Actions
   setIsPlaying: (isPlaying: boolean) => void;
   togglePlayback: () => void;
-  setCurrentTime: (time: Milliseconds) => void;
-  setCurrentFrame: (frame: number) => void;
+  setCurrentTime: (time: Milliseconds, fps?: number) => void;
+  setCurrentFrame: (frame: number, fps?: number) => void;
   setDuration: (msval: Milliseconds) => void;
   setActiveTab: (tab: SidebarTab) => void;
   setZoomLevel: (level: number) => void;
@@ -49,8 +49,17 @@ export const useEditorStore = create<EditorState>((set) => ({
 
   setIsPlaying: (isPlaying) => set({ isPlaying }),
   togglePlayback: () => set((state) => ({ isPlaying: !state.isPlaying })),
-  setCurrentTime: (currentTime) => set({ currentTime }),
-  setCurrentFrame: (currentFrame) => set({ currentFrame }),
+  
+  setCurrentTime: (currentTime, fps = 30) => set({ 
+    currentTime: ms(Math.max(0, Number(currentTime))),
+    currentFrame: Math.floor((Number(currentTime) / 1000) * fps)
+  }),
+  
+  setCurrentFrame: (currentFrame, fps = 30) => set({ 
+    currentFrame: Math.max(0, currentFrame),
+    currentTime: ms(Math.round((currentFrame / fps) * 1000))
+  }),
+  
   setDuration: (duration) => set({ duration }),
   setActiveTab: (activeTab) => set({ activeTab }),
   setZoomLevel: (zoomLevel) => set({ zoomLevel }),
