@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Plus, MoreVertical, Calendar, Film, X, Edit2, Trash2, Video } from 'lucide-react';
+import { Plus, MoreVertical, Calendar, Film, X, Edit2, Trash2, Video, Settings as SettingsIcon } from 'lucide-react';
 import Link from 'next/link';
 
 interface Project {
@@ -90,13 +90,22 @@ export default function ProjectDashboard() {
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">Volt</h1>
           </div>
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center justify-center gap-2 rounded-md bg-red-700 hover:bg-red-800 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-200"
-          >
-            <Plus size={18} />
-            New Project
-          </button>
+          <div className="flex items-center gap-4">
+            <Link 
+              href="/settings"
+              className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all duration-200"
+              title="Settings"
+            >
+              <SettingsIcon size={20} />
+            </Link>
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="flex items-center justify-center gap-2 rounded-md bg-red-700 hover:bg-red-800 px-5 py-2.5 text-sm font-medium text-white transition-colors duration-200"
+            >
+              <Plus size={18} />
+              New Project
+            </button>
+          </div>
         </div>
       </header>
 

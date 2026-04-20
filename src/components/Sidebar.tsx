@@ -1,4 +1,5 @@
 import { Layers, Upload, Type, Settings, ChevronLeft } from 'lucide-react';
+import Link from 'next/link';
 
 interface SidebarProps {
   activeTab: string;
@@ -43,13 +44,16 @@ export default function Sidebar({ activeTab, onTabClick, isCollapsed = false }: 
 
       {/* Bottom Actions */}
       <div className="mt-auto flex flex-col items-center gap-3">
-        <button className="relative p-3 rounded-md text-gray-400 hover:text-gray-900 hover:bg-gray-50 group border border-transparent flex flex-col items-center gap-1 transition-all duration-200">
+        <Link 
+          href="/settings"
+          className="relative p-3 rounded-md text-gray-400 hover:text-gray-900 hover:bg-gray-50 group border border-transparent flex flex-col items-center gap-1 transition-all duration-200"
+        >
           <Settings size={22} className="stroke-2" />
           <span className="text-[10px] font-semibold tracking-tight">Settings</span>
           <div className="absolute left-full ml-3 px-2 py-1 rounded bg-gray-900 text-[11px] font-medium text-white whitespace-nowrap opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 transition-all duration-200 pointer-events-none z-50 origin-left">
             Preferences
           </div>
-        </button>
+        </Link>
       </div>
     </nav>
   );
