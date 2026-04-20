@@ -45,11 +45,10 @@ export default function Timeline({ projectName }: TimelineProps) {
   const [mutedTracks, setMutedTracks] = useState<Set<string>>(new Set());
   const [engineStatus, setEngineStatus] = useState('initializing');
 
-  // Utility to calculate time from a clientX coordinate
   const getTimeFromX = useCallback((clientX: number) => {
     if (!trackAreaRef.current) return ms(0);
     const rect = trackAreaRef.current.getBoundingClientRect();
-    const x = clientX - rect.left - 64; // Subtract track label column width
+    const x = clientX - rect.left - 64;
     return pxToMs(Math.max(0, x), zoomLevel);
   }, [zoomLevel]);
 
@@ -59,7 +58,6 @@ export default function Timeline({ projectName }: TimelineProps) {
     const newTime = getTimeFromX(e.clientX);
     useEditorStore.getState().setCurrentTime(newTime, fps);
     
-    // Add global move/up listeners to handle dragging outside the element
     window.addEventListener('mousemove', handleGlobalMouseMove);
     window.addEventListener('mouseup', handleGlobalMouseUp);
   };
@@ -76,7 +74,6 @@ export default function Timeline({ projectName }: TimelineProps) {
     window.removeEventListener('mouseup', handleGlobalMouseUp);
   };
 
-  // Playback Loop
   const animate = useCallback((time: number) => {
     if (lastTimeRef.current !== null) {
       const delta = time - lastTimeRef.current;
@@ -118,7 +115,6 @@ export default function Timeline({ projectName }: TimelineProps) {
     });
   };
 
-  // Generate ruler marks based on zoom
   const rulerMarks = Array.from({ length: 11 }, (_, i) => {
     const time = i * 5000; // Every 5 seconds
     return {

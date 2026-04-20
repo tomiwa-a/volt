@@ -19,11 +19,22 @@ declare global {
 
 class EngineService {
   private static instance: EngineService;
-  private isLoaded = false;
-  private go: Go | null = null;
-  private loadPromise: Promise<void> | null = null;
+  private worker: Worker | null = null;
+  private onFrameCallback: ((bitmap: ImageBitmap) => void) | null = null;
 
-  private constructor() {}
+  private constructor() {
+    if (typeof window !== 'undefined') {
+      // Initialize the decoder worker
+      this.worker = new Worker(new URL('./VideoDecoderWorker.ts', import.meta.url));
+      
+      this.worker.onmessage = (e) => {
+        const { type, payload } = e.data;
+        if (type === 'FRAME' && this.onFrameCallback) {
+          this.onFrameCallback(payload.bitmap);
+        }
+      };
+    }
+  }
 
   public static getInstance(): EngineService {
     if (!EngineService.instance) {
@@ -32,50 +43,31 @@ class EngineService {
     return EngineService.instance;
   }
 
-  public async init(): Promise<void> {
-    if (this.isLoaded) return;
-    if (this.loadPromise) return this.loadPromise;
-
-    this.loadPromise = (async () => {
-      try {
-        console.log('[Engine] Loading Go WASM runtime...');
-
-        // 1. Ensure wasm_exec.js is loaded (it should be in public/)
-        if (typeof Go === 'undefined') {
-          throw new Error('Go runtime (wasm_exec.js) not found. Is it loaded in the document?');
-        }
-
-        this.go = new Go();
-        const response = await fetch('/engine.wasm');
-        const buffer = await response.arrayBuffer();
-
-        console.log('[Engine] Instantiating WASM...');
-        const result = await WebAssembly.instantiate(buffer, this.go.importObject);
-
-        // Run the Go program (this will block but the syscalls will be available)
-        this.go.run(result.instance);
-
-        this.isLoaded = true;
-        console.log('[Engine] Go WASM Bridge established.');
-      } catch (error) {
-        console.error('[Engine] Failed to initialize WASM engine:', error);
-        this.loadPromise = null;
-        throw error;
-      }
-    })();
-
-    return this.loadPromise;
+  /**
+   * Initializes the decoder for a specific file.
+   */
+  public async loadFile(file: File) {
+    this.worker?.postMessage({ type: 'INIT', payload: { file } });
   }
 
-  public getStats() {
-    if (!this.isLoaded) return null;
-    return window.volt_getStats();
+  /**
+   * Requests a frame at a specific time.
+   */
+  public seek(timeMs: number) {
+    this.worker?.postMessage({ type: 'SEEK', payload: { time: timeMs } });
   }
 
-  public render(index: number) {
-    if (!this.isLoaded) return null;
-    return window.volt_renderFrame(index);
+  /**
+   * Register a callback for when a new frame is decoded.
+   */
+  public onFrame(callback: (bitmap: ImageBitmap) => void) {
+    this.onFrameCallback = callback;
   }
+
+  // Placeholder methods for UI compatibility during transition
+  public getStats() { return { status: 'decoding', version: '0.1.0' }; }
+  public render(index: number) { return null; }
+  public async init() { return Promise.resolve(); }
 }
 
 export const engine = EngineService.getInstance();
