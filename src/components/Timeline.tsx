@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useEditorStore } from '@/store/useEditorStore';
+import { engine } from '@/lib/engine/EngineService';
 import {
   Play, Pause, SkipBack, SkipForward,
   Rewind, FastForward, Maximize2, ChevronDown, ChevronUp,
@@ -28,6 +29,19 @@ export default function Timeline({ projectName }: TimelineProps) {
   } = useEditorStore();
 
   const [mutedTracks, setMutedTracks] = useState<Set<string>>(new Set());
+  const [engineStatus, setEngineStatus] = useState('initializing');
+
+  useEffect(() => {
+    if (showStats) {
+      const interval = setInterval(() => {
+        const stats = engine.getStats();
+        if (stats) {
+          setEngineStatus(stats.status);
+        }
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [showStats]);
 
   const toggleTrackMute = (id: string) => {
     setMutedTracks(prev => {
@@ -111,7 +125,7 @@ export default function Timeline({ projectName }: TimelineProps) {
             ['Decode', '2.1 ms'],
             ['Composite', '0.8 ms'],
             ['Buffer', '64 MB'],
-            ['Engine', 'idle'],
+            ['Engine', engineStatus],
             ['SAB', 'active'],
           ].map(([label, val]) => (
             <div key={label} className="flex items-center gap-1.5">
