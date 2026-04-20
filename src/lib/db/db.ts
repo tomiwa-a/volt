@@ -1,47 +1,24 @@
 import Dexie, { type Table } from 'dexie';
-
-export interface Project {
-  id?: number;
-  slug: string;
-  name: string;
-  fps: number;
-  resolution: {
-    width: number;
-    height: number;
-    label: string;
-  };
-  lastModified: number;
-  createdAt: number;
-}
-
-export interface Asset {
-  id?: number;
-  projectId: number;
-  name: string;
-  type: 'video' | 'audio' | 'image';
-  size: number;
-  duration: number; // in milliseconds
-  fileHandle: FileSystemFileHandle; // The holy grail for local-first
-  lastModified: number;
-}
+import { Project, Asset, Track } from '@/types/schema';
+import { ProjectId } from '@/types/identifiers';
 
 export interface TimelineData {
-  id?: number;
-  projectId: number;
-  tracks: any; // Simplified for now, will be our EDL structure
+  id: string; // Timeline ID
+  projectId: ProjectId; 
+  tracks: Track[];
 }
 
 export class VoltDatabase extends Dexie {
-  projects!: Table<Project>;
-  assets!: Table<Asset>;
+  projects!: Table<Project>; 
+  assets!: Table<Asset & { projectId: ProjectId }>;
   timeline!: Table<TimelineData>;
 
   constructor() {
-    super('VoltDB');
-    this.version(1).stores({
-      projects: '++id, slug, name, lastModified',
-      assets: '++id, projectId, name, type',
-      timeline: '++id, projectId',
+    super('VoltDatabase');
+    this.version(3).stores({
+      projects: 'id, slug, name, lastModified',
+      assets: 'id, projectId, type',
+      timeline: 'id, projectId'
     });
   }
 }

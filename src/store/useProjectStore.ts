@@ -1,31 +1,12 @@
 import { create } from 'zustand';
 import { db } from '@/lib/db/db';
-
-export interface Asset {
-  id: string;
-  name: string;
-  type: 'video' | 'audio' | 'image';
-  duration: number; // ms
-  size: number;
-  handle?: FileSystemFileHandle; 
-}
-
-export interface Clip {
-  id: string;
-  assetId: string;
-  startTime: number; 
-  duration: number; 
-  assetOffset: number; 
-}
-
-export interface Track {
-  id: string;
-  type: 'video' | 'audio' | 'captions';
-  clips: Clip[];
-}
+import { Asset, Clip, Track, Project } from '@/types/schema';
+import { Milliseconds, ms } from '@/types/units';
+import { ProjectId, AssetId, TrackId, ClipId, asProjectId } from '@/types/identifiers';
+import { generateId } from '@/lib/utils/ids';
 
 interface ProjectState {
-  id: string | null;
+  id: ProjectId | null;
   name: string;
   assets: Asset[];
   tracks: Track[];
@@ -36,32 +17,32 @@ interface ProjectState {
   setProject: (data: Partial<ProjectState>) => void;
   loadProject: (id: string) => Promise<void>;
   addAsset: (asset: Asset) => void;
-  removeAsset: (assetId: string) => void;
-  addClip: (trackId: string, clip: Clip) => void;
-  removeClip: (trackId: string, clipId: string) => void;
-  updateClip: (trackId: string, clipId: string, updates: Partial<Clip>) => void;
+  removeAsset: (assetId: AssetId) => void;
+  addClip: (trackId: TrackId, clip: Clip) => void;
+  removeClip: (trackId: TrackId, clipId: ClipId) => void;
+  updateClip: (trackId: TrackId, clipId: ClipId, updates: Partial<Clip>) => void;
   setTracks: (tracks: Track[]) => void;
   clearProject: () => void;
 }
 
-const DEFAULT_TRACKS: Track[] = [
-  { id: 'video-1', type: 'video', clips: [] },
-  { id: 'audio-1', type: 'audio', clips: [] },
-  { id: 'captions-1', type: 'captions', clips: [] },
+const createDefaultTracks = (): Track[] => [
+  { id: generateId('track') as TrackId, type: 'video', clips: [] },
+  { id: generateId('track') as TrackId, type: 'audio', clips: [] },
+  { id: generateId('track') as TrackId, type: 'captions', clips: [] },
 ];
 
 export const useProjectStore = create<ProjectState>((set) => ({
   id: null,
   name: 'New Project',
   assets: [],
-  tracks: DEFAULT_TRACKS,
+  tracks: [],
   fps: 30,
   resolution: { width: 1920, height: 1080, label: '1080p' },
 
   setProject: (data) => set((state) => ({ ...state, ...data })),
 
   loadProject: async (id) => {
-    const projectId = parseInt(id);
+    const projectId = asProjectId(id);
     const project = await db.projects.get(projectId);
     if (!project) return;
 
@@ -70,19 +51,23 @@ export const useProjectStore = create<ProjectState>((set) => ({
     const assets = await db.assets.where('projectId').equals(projectId).toArray();
 
     set({
-      id: project.id?.toString() || id,
+      id: project.id,
       name: project.name,
       fps: project.fps,
-      resolution: project.resolution,
+      resolution: {
+        width: project.resolution.width as number,
+        height: project.resolution.height as number,
+        label: project.resolution.label,
+      },
       assets: assets.map(a => ({
-        id: a.id?.toString() || '',
+        id: a.id,
         name: a.name,
         type: a.type,
-        duration: a.duration,
+        duration: ms(a.duration),
         size: a.size,
-        handle: a.fileHandle
+        handle: a.handle
       })),
-      tracks: timeline?.tracks || DEFAULT_TRACKS,
+      tracks: timeline?.tracks || createDefaultTracks(),
     });
   },
 
@@ -113,7 +98,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
     id: null,
     name: 'New Project',
     assets: [],
-    tracks: DEFAULT_TRACKS,
+    tracks: createDefaultTracks(),
     fps: 30,
     resolution: { width: 1920, height: 1080, label: '1080p' },
   }),

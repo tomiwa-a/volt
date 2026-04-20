@@ -1,13 +1,13 @@
 import { create } from 'zustand';
-
-export type SidebarTab = 'assets' | 'text' | 'captions' | 'layers';
+import { SidebarTab } from '@/types/schema';
+import { Milliseconds, ms } from '@/types/units';
 
 interface EditorState {
   // Playback
   isPlaying: boolean;
-  currentTime: number; // in milliseconds
+  currentTime: Milliseconds;
   currentFrame: number;
-  duration: number; // total duration of project in ms
+  duration: Milliseconds;
   
   // UI State
   activeTab: SidebarTab;
@@ -21,9 +21,9 @@ interface EditorState {
   // Actions
   setIsPlaying: (isPlaying: boolean) => void;
   togglePlayback: () => void;
-  setCurrentTime: (time: number) => void;
+  setCurrentTime: (time: Milliseconds) => void;
   setCurrentFrame: (frame: number) => void;
-  setDuration: (ms: number) => void;
+  setDuration: (msval: Milliseconds) => void;
   setActiveTab: (tab: SidebarTab) => void;
   setZoomLevel: (level: number) => void;
   setSelectedClipId: (id: string | null) => void;
@@ -35,9 +35,9 @@ interface EditorState {
 
 export const useEditorStore = create<EditorState>((set) => ({
   isPlaying: false,
-  currentTime: 0,
+  currentTime: ms(0),
   currentFrame: 0,
-  duration: 0,
+  duration: ms(0),
   
   activeTab: 'assets',
   zoomLevel: 100,

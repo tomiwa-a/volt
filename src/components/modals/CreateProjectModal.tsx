@@ -1,30 +1,31 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Layout, Video, Monitor, Smartphone, Layers } from 'lucide-react';
+import { X, Layout, Video, Monitor, Smartphone } from 'lucide-react';
 import { db } from '@/lib/db/db';
 import { useProjectStore } from '@/store/useProjectStore';
+import { generateId } from '@/lib/utils/ids';
+import { ProjectId } from '@/types/identifiers';
+import { Resolution } from '@/types/schema';
+import { px } from '@/types/units';
 
-interface Resolution {
+interface ResolutionOption extends Resolution {
   id: string;
-  label: string;
-  width: number;
-  height: number;
   icon: any;
 }
 
-const RESOLUTIONS: Resolution[] = [
-  { id: '1080p',   label: 'Landscape (1080p)', width: 1920, height: 1080, icon: Monitor },
-  { id: '4k',      label: 'Ultra HD (4K)',     width: 3840, height: 2160, icon: Monitor },
-  { id: '9-16',    label: 'Portrait (TikTok)', width: 1080, height: 1920, icon: Smartphone },
-  { id: '1-1',     label: 'Square (Post)',     width: 1080, height: 1080, icon: Layout },
+const RESOLUTIONS: ResolutionOption[] = [
+  { id: '1080p',   label: 'Landscape (1080p)', width: px(1920), height: px(1080), icon: Monitor },
+  { id: '4k',      label: 'Ultra HD (4K)',     width: px(3840), height: px(2160), icon: Monitor },
+  { id: '9-16',    label: 'Portrait (TikTok)', width: px(1080), height: px(1920), icon: Smartphone },
+  { id: '1-1',     label: 'Square (Post)',     width: px(1080), height: px(1080), icon: Layout },
 ];
 
 const FPS_OPTIONS = [24, 30, 60];
 
 interface CreateProjectModalProps {
   onClose: () => void;
-  onSuccess: (projectId: number) => void;
+  onSuccess: (projectId: string) => void;
 }
 
 export default function CreateProjectModal({ onClose, onSuccess }: CreateProjectModalProps) {
@@ -40,8 +41,10 @@ export default function CreateProjectModal({ onClose, onSuccess }: CreateProject
     try {
       const res = RESOLUTIONS.find(r => r.id === resId)!;
       const slug = name.toLowerCase().replace(/\s+/g, '-');
+      const projectId = generateId('proj') as ProjectId;
       
-      const id = await db.projects.add({
+      await db.projects.add({
+        id: projectId,
         name,
         slug,
         fps,
@@ -54,18 +57,10 @@ export default function CreateProjectModal({ onClose, onSuccess }: CreateProject
         lastModified: Date.now(),
       });
 
-      // Update store state
-      useProjectStore.getState().setProject({
-        id: id.toString(),
-        name,
-        assets: [],
-        tracks: [
-          { id: 'video-1', type: 'video', clips: [] },
-          { id: 'audio-1', type: 'audio', clips: [] },
-        ],
-      });
+      // Hydrate store state immediately
+      await useProjectStore.getState().loadProject(projectId);
 
-      onSuccess(id as number);
+      onSuccess(projectId);
     } catch (err) {
       console.error('Failed to create project:', err);
     } finally {

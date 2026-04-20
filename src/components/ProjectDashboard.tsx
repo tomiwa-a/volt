@@ -3,18 +3,20 @@ import { Plus, MoreVertical, Calendar, Film, X, Edit2, Trash2, Video, Settings a
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, Project } from '@/lib/db/db';
+import { db } from '@/lib/db/db';
+import { Project } from '@/types/schema';
+import { ProjectId } from '@/types/identifiers';
 import CreateProjectModal from '@/components/modals/CreateProjectModal';
 
 export default function ProjectDashboard() {
   const router = useRouter();
-  const projects = useLiveQuery(() => db.projects.orderBy('lastModified').reverse().toArray());
+  const projects = useLiveQuery(() => db.projects.orderBy('lastModified').reverse().toArray()) as Project[] | undefined;
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Dropdown State
-  const [openDropdownId, setOpenDropdownId] = useState<number | null>(null);
+  const [openDropdownId, setOpenDropdownId] = useState<ProjectId | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on click outside
@@ -28,14 +30,14 @@ export default function ProjectDashboard() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: ProjectId) => {
     if (confirm('Are you sure you want to delete this project?')) {
       await db.projects.delete(id);
       setOpenDropdownId(null);
     }
   };
 
-  const handleProjectSuccess = (id: number) => {
+  const handleProjectSuccess = (id: string) => {
     setIsModalOpen(false);
     router.push(`/editor/${id}`);
   };
@@ -114,7 +116,7 @@ export default function ProjectDashboard() {
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    setOpenDropdownId(openDropdownId === project.id ? null : (project.id as number));
+                    setOpenDropdownId(openDropdownId === project.id ? null : project.id);
                   }}
                 >
                   <MoreVertical size={16} />

@@ -1,4 +1,5 @@
-import { useEditorStore, SidebarTab } from '@/store/useEditorStore';
+import { SidebarTab } from '@/types/schema';
+import { useEditorStore } from '@/store/useEditorStore';
 import { Layers, Upload, Type, Settings } from 'lucide-react';
 import Link from 'next/link';
 
