@@ -1,14 +1,11 @@
-import { Layers, Upload, Type, Settings, ChevronLeft } from 'lucide-react';
+import { useEditorStore, SidebarTab } from '@/store/useEditorStore';
+import { Layers, Upload, Type, Settings } from 'lucide-react';
 import Link from 'next/link';
 
-interface SidebarProps {
-  activeTab: string;
-  onTabClick: (id: string) => void;
-  isCollapsed?: boolean;
-}
+export default function Sidebar() {
+  const { activeTab, setActiveTab } = useEditorStore();
 
-export default function Sidebar({ activeTab, onTabClick, isCollapsed = false }: SidebarProps) {
-  const tabs = [
+  const tabs: { id: SidebarTab; icon: any; label: string; tooltip: string }[] = [
     { id: 'assets', icon: Upload, label: 'Assets', tooltip: 'Media library' },
     { id: 'text', icon: Type, label: 'Text', tooltip: 'Add text & titles' },
     { id: 'captions', icon: Type, label: 'Captions', tooltip: 'Manage subtitles' },
@@ -23,7 +20,7 @@ export default function Sidebar({ activeTab, onTabClick, isCollapsed = false }: 
         return (
           <button
             key={tab.id}
-            onClick={() => onTabClick(tab.id)}
+            onClick={() => setActiveTab(tab.id)}
             className={`relative p-3 rounded-md group flex flex-col items-center gap-1 transition-all duration-200 ${
               isActive
                 ? 'bg-red-50 text-red-700 border border-red-100'

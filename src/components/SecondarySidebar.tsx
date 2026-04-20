@@ -1,16 +1,12 @@
 'use client';
 
 import { useState } from 'react';
+import { useEditorStore } from '@/store/useEditorStore';
+import { useProjectStore } from '@/store/useProjectStore';
 import { X, Upload, Film, Music, AlignLeft, AlignCenter, AlignRight, ChevronRight, Mic } from 'lucide-react';
 
-interface SecondarySidebarProps {
-  activeTab: string;
-  isOpen: boolean;
-  onClose: () => void;
-}
-
-export default function SecondarySidebar({ activeTab, isOpen, onClose }: SecondarySidebarProps) {
-  if (!isOpen) return null;
+export default function SecondarySidebar() {
+  const { activeTab, setActiveTab } = useEditorStore();
 
   const labels: Record<string, string> = {
     assets: 'Assets',
@@ -23,12 +19,6 @@ export default function SecondarySidebar({ activeTab, isOpen, onClose }: Seconda
     <div className="w-[300px] flex-shrink-0 h-full bg-white border-r border-gray-200 flex flex-col">
       <div className="h-[44px] px-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
         <span className="text-xs font-semibold text-gray-900 tracking-tight">{labels[activeTab]}</span>
-        <button
-          onClick={onClose}
-          className="p-1 text-gray-400 hover:text-gray-700 rounded transition-colors"
-        >
-          <X size={14} />
-        </button>
       </div>
       <div className="flex-1 overflow-y-auto">
         {activeTab === 'assets' && <AssetsPanel />}
@@ -42,17 +32,11 @@ export default function SecondarySidebar({ activeTab, isOpen, onClose }: Seconda
 
 type AssetFilter = 'all' | 'video' | 'audio';
 
-const MOCK_ASSETS = [
-  { id: '1', name: 'summer_vlog_main.mp4', type: 'video' as const, duration: '12:34' },
-  { id: '2', name: 'b_roll_beach.mp4',     type: 'video' as const, duration: '02:11' },
-  { id: '3', name: 'ambient_waves.mp3',    type: 'audio' as const, duration: '05:00' },
-  { id: '4', name: 'voiceover_take2.mp3',  type: 'audio' as const, duration: '01:43' },
-];
-
 function AssetsPanel() {
+  const { assets } = useProjectStore();
   const [filter, setFilter] = useState<AssetFilter>('all');
 
-  const filtered = MOCK_ASSETS.filter(a => filter === 'all' || a.type === filter);
+  const filtered = assets.filter(a => filter === 'all' || a.type === filter);
 
   const filters: { id: AssetFilter; label: string }[] = [
     { id: 'all',   label: 'All' },
@@ -110,7 +94,7 @@ function AssetsPanel() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-gray-900 truncate">{asset.name}</p>
-                  <p className="text-[10px] text-gray-400 font-mono">{asset.duration}</p>
+                  <p className="text-[10px] text-gray-400 font-mono">{(asset.duration / 1000).toFixed(1)}s</p>
                 </div>
                 <ChevronRight size={12} className="text-gray-300 opacity-0 group-hover:opacity-100 flex-shrink-0 transition-opacity" />
               </li>
@@ -122,17 +106,15 @@ function AssetsPanel() {
   );
 }
 
-// Simulates "nothing selected" state — in production, this comes from Zustand
-const SELECTED_CLIP = null as null | { label: string };
-
 function TextPanel() {
+  const { selectedClipId } = useEditorStore();
   const [fontSize, setFontSize] = useState('32');
   const [align, setAlign] = useState<'left' | 'center' | 'right'>('center');
   const [bold, setBold] = useState(false);
   const [italic, setItalic] = useState(false);
   const [underline, setUnderline] = useState(false);
 
-  if (!SELECTED_CLIP) {
+  if (!selectedClipId) {
     return (
       <div className="flex flex-col items-center justify-center h-full px-6 gap-2 text-center">
         <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-400">

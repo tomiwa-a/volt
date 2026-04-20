@@ -1,6 +1,5 @@
-'use client';
-
 import { useState } from 'react';
+import { useEditorStore } from '@/store/useEditorStore';
 import {
   Play, Pause, SkipBack, SkipForward,
   Rewind, FastForward, Maximize2, ChevronDown, ChevronUp,
@@ -19,9 +18,15 @@ const TRACKS = [
 const RULER_MARKS = ['0:00', '0:05', '0:10', '0:15', '0:20', '0:25', '0:30'];
 
 export default function Timeline({ projectName }: TimelineProps) {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [showStats, setShowStats] = useState(false);
+  const { 
+    isPlaying, 
+    togglePlayback, 
+    showStats, 
+    setShowStats, 
+    isTimelineCollapsed: isCollapsed, 
+    setIsTimelineCollapsed: setIsCollapsed 
+  } = useEditorStore();
+
   const [mutedTracks, setMutedTracks] = useState<Set<string>>(new Set());
 
   const toggleTrackMute = (id: string) => {
@@ -161,7 +166,7 @@ export default function Timeline({ projectName }: TimelineProps) {
         </button>
 
         <button
-          onClick={() => setIsPlaying(!isPlaying)}
+          onClick={togglePlayback}
           className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-red-700 hover:bg-red-800 text-white text-xs font-semibold transition-colors"
         >
           {isPlaying

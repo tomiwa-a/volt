@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useAppStore, Theme, ExportFormat, Resolution, FrameRate } from '@/store/useAppStore';
 import {
   SlidersHorizontal,
   Database,
@@ -72,10 +73,12 @@ export default function SettingsPage() {
 
 /* ─── General ──────────────────────────────────────────────────── */
 function GeneralSettings() {
-  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('light');
-  const [exportFmt, setExportFmt] = useState<'mp4' | 'webm'>('mp4');
-  const [resolution, setResolution] = useState<'720p' | '1080p' | '4k'>('1080p');
-  const [fps, setFps] = useState<'24' | '30' | '60'>('30');
+  const { 
+    theme, setTheme, 
+    exportFormat, setExportFormat, 
+    resolution, setResolution, 
+    frameRate, setFrameRate 
+  } = useAppStore();
 
   return (
     <div className="space-y-8">
@@ -86,7 +89,7 @@ function GeneralSettings() {
           <SegmentedControl
             options={[{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }, { value: 'system', label: 'System' }]}
             value={theme}
-            onChange={(v) => setTheme(v as typeof theme)}
+            onChange={(v) => setTheme(v as Theme)}
           />
         </SettingsRow>
       </SettingsGroup>
@@ -95,22 +98,22 @@ function GeneralSettings() {
         <SettingsRow label="Format" note="Used when opening the export dialog">
           <SegmentedControl
             options={[{ value: 'mp4', label: 'MP4' }, { value: 'webm', label: 'WebM' }]}
-            value={exportFmt}
-            onChange={(v) => setExportFmt(v as typeof exportFmt)}
+            value={exportFormat}
+            onChange={(v) => setExportFormat(v as ExportFormat)}
           />
         </SettingsRow>
         <SettingsRow label="Resolution" note="Default render resolution">
           <SegmentedControl
             options={[{ value: '720p', label: '720p' }, { value: '1080p', label: '1080p' }, { value: '4k', label: '4K' }]}
             value={resolution}
-            onChange={(v) => setResolution(v as typeof resolution)}
+            onChange={(v) => setResolution(v as Resolution)}
           />
         </SettingsRow>
         <SettingsRow label="Frame Rate" note="Frames per second for new projects">
           <SegmentedControl
             options={[{ value: '24', label: '24' }, { value: '30', label: '30' }, { value: '60', label: '60' }]}
-            value={fps}
-            onChange={(v) => setFps(v as typeof fps)}
+            value={frameRate}
+            onChange={(v) => setFrameRate(v as FrameRate)}
           />
         </SettingsRow>
       </SettingsGroup>
