@@ -139,7 +139,7 @@ async function seekTo(timeMs: Milliseconds, requestSeekId?: number) {
     targetIndex = i;
   }
 
-  seekTargetTimestamp = samples[targetIndex].cts * (1000000 / timescale);
+  seekTargetTimestamp = Math.round(samples[targetIndex].cts * (1000000 / timescale));
 
   if (frameBuffer) {
     frameBuffer.clear(); // Clear old frames from previous scrub
@@ -153,19 +153,15 @@ async function seekTo(timeMs: Milliseconds, requestSeekId?: number) {
   if (seekId !== currentSeekId) return;
   console.log(`[DecoderWorker] [${seekId}] Found target frame at index ${targetIndex}, keyframe at index ${keyIndex}`);
 
-  // Setup the persistent decoder if it doesn't exist
-  ensureDecoder();
-
-  // Reset the decoder to clear any pending frames from previous seeks/pre-buffering
-  try {
-    decoder?.reset();
-    configureDecoder();
-  } catch (e) {
-    console.error(`[DecoderWorker] [${seekId}] Decoder reset/reconfig failed:`, e);
-    decoder?.close();
+  // macOS VideoToolbox Stall Fix:
+  // VideoDecoder.reset() is known to cause severe latency spikes (500ms+) on mac.
+  // Closing and recreating the decoder is much faster and completely clears the hardware queue.
+  if (decoder) {
+    try { decoder.close(); } catch (_) {}
     decoder = null;
-    ensureDecoder();
   }
+  
+  ensureDecoder();
 
   seekFrameTotal = targetIndex - keyIndex + 1;
   seekFrameDecoded = 0;
@@ -182,8 +178,8 @@ async function seekTo(timeMs: Milliseconds, requestSeekId?: number) {
     }));
   }
 
-  // Pre-buffer logic (60 frames ahead)
-  const prebufferCount = 60;
+  // Pre-buffer logic (reduced to 30 frames to limit CPU saturation on scrub)
+  const prebufferCount = 30;
   for (let i = targetIndex + 1; i < Math.min(samples.length, targetIndex + 1 + prebufferCount); i++) {
     if (seekId !== currentSeekId) break;
     const s = samples[i];
@@ -211,13 +207,19 @@ function ensureDecoder() {
 
   decoder = new VideoDecoder({
     output: (frame) => {
+      // Use a tolerance threshold or integer rounding because WebCodecs casts timestamps to integers internally, 
+      // whereas JS float multiplication introduces decimals.
+      const timestampMs = Math.round(frame.timestamp);
+      const targetMs = Math.round(seekTargetTimestamp);
+      
       // Discard intermediate delta frames that are only needed to reconstruct the target frame
-      if (frame.timestamp < seekTargetTimestamp) {
+      // We allow a small 10us tolerance just in case of rounding divergence
+      if (timestampMs < targetMs - 10) {
         frame.close();
         return;
       }
 
-      const isTarget = frame.timestamp === seekTargetTimestamp;
+      const isTarget = Math.abs(timestampMs - targetMs) <= 10;
 
       if (frameBuffer) {
         const writeIndex = frameBuffer.reserveWriteSlot();
@@ -269,15 +271,20 @@ function configureDecoder() {
   });
 }
 
+let cachedExtraData: Uint8Array | null = null;
+
 /** Extract AVC/HEVC/VP9 codec configuration from the MP4 container. */
 function getExtraData(file: any) {
+  if (cachedExtraData) return cachedExtraData;
+
   const track = file.getTrackById(videoTrack.id);
   for (const entry of track.mdia.minf.stbl.stsd.entries) {
     if (entry.avcC || entry.hvcC || entry.vpcC) {
       const box = entry.avcC || entry.hvcC || entry.vpcC;
       const stream = new (MP4Box as any).DataStream(undefined, 0, (MP4Box as any).DataStream.BIG_ENDIAN);
       box.write(stream);
-      return new Uint8Array(stream.buffer, 8);
+      cachedExtraData = new Uint8Array(stream.buffer, 8); // Skip box header
+      return cachedExtraData;
     }
   }
   return null;
