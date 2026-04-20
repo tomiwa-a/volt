@@ -42,7 +42,6 @@ class TelemetryManager {
     const startTime = this.pendingSeeks.get(id);
     if (startTime) {
       this.addSample('decodeLatency', performance.now() - startTime);
-      this.pendingSeeks.delete(id);
     }
 
     const now = performance.now();

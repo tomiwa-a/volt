@@ -33,29 +33,27 @@ class EngineService {
       this.frameBuffer = new FrameBufferManager();
 
       // Log hardware profile for reference (multi-worker pool coming in next phase)
-      const cores = navigator.hardwareConcurrency || 4;
-      const memory = (navigator as any).deviceMemory || 4;
-      console.log(`[Engine] Optimized for: 1 Worker (Cores: ${cores}, RAM: ${memory}GB) | Pool coming in next phase`);
-
       this.worker = new Worker(new URL('./VideoDecoderWorker.ts', import.meta.url), { type: 'module' });
       
       this.worker.onmessage = (e) => {
         const { type, payload } = e.data;
         if (type === 'FRAME' && this.onFrameCallback) {
+          telemetry.recordFrameReady(payload.seekId || payload.timeMs);
           this.onFrameCallback(payload.bitmap);
         }
-        if (type === 'TARGET_READY' && this.onFrameCallback && this.frameBuffer) {
+        if (type === 'BUFFER_READY' && this.frameBuffer) {
+          // Record telemetry for EVERY frame (keeps monitor alive and accurate)
           telemetry.recordFrameReady(payload.seekId || payload.timeMs);
           telemetry.recordBufferCount(this.frameBuffer.getStats().count);
 
-          const pixels = this.frameBuffer.getFrameAt(payload.timeMs);
-          if (pixels) {
-            this.onFrameCallback(pixels);
-            this.frameBuffer.advance(1); // Consume the frame we just drew
+          // But only render the target frame to the canvas
+          if (payload.isTarget && this.onFrameCallback) {
+            const pixels = this.frameBuffer.getFrameAt(payload.timeMs);
+            if (pixels) {
+              this.onFrameCallback(pixels);
+              this.frameBuffer.advance(1);
+            }
           }
-        }
-        if (type === 'PREBUFFERED' && this.frameBuffer) {
-          telemetry.recordBufferCount(this.frameBuffer.getStats().count);
         }
       };
     }
@@ -76,7 +74,10 @@ class EngineService {
     if (key === this.activeFileKey) return;
     this.activeFileKey = key;
 
+    // Reset everything for the new file to prevent stale metrics/latencies
     this.frameBuffer?.clear();
+    this.lastSeekId = 0;
+
     this.worker?.postMessage({ 
       type: 'INIT', 
       payload: { 

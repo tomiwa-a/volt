@@ -12,7 +12,8 @@ export const PerformanceMonitor: React.FC = () => {
     if (!isVisible) return;
 
     const interval = setInterval(() => {
-      setMetrics(telemetry.getSummary());
+      const summary = telemetry.getSummary();
+      setMetrics(summary);
       renderCharts();
     }, 100);
 

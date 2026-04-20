@@ -20,6 +20,7 @@ let currentSeekId = 0;
 let seekTargetTimestamp = 0;
 let seekFrameTotal = 0;
 let seekFrameDecoded = 0;
+let lastFoundTargetSeekId = -1;
 
 ctx.onmessage = async (e) => {
   const { type, payload } = e.data;
@@ -76,7 +77,6 @@ async function initFile(file: File, loadId: number) {
   };
 
   mp4boxFile.onSamples = (_id: number, _user: any, fetchedSamples: any[]) => {
-    console.log(`[DecoderWorker] MP4Box onSamples: received ${fetchedSamples.length} new samples`);
     for (let i = 0; i < fetchedSamples.length; i++) {
       samples.push(fetchedSamples[i]);
     }
@@ -115,17 +115,13 @@ async function initFile(file: File, loadId: number) {
     }
   }
 
-  console.log('[DecoderWorker] File read loop complete. Calling flush().');
   mp4boxFile.flush();
 }
 
 async function seekTo(timeMs: Milliseconds, requestSeekId?: number) {
   const seekId = requestSeekId ?? ++currentSeekId;
   currentSeekId = seekId; // Keep internal counter in sync
-  console.log(`[DecoderWorker] [${seekId}] SEEK received for ${timeMs}ms`);
-  
   if (!videoTrack || samples.length === 0) {
-    console.log(`[DecoderWorker] [${seekId}] SEEK deferred: track ready=${!!videoTrack}, samples=${samples.length}`);
     pendingSeekMs = timeMs;
     return;
   }
@@ -141,27 +137,25 @@ async function seekTo(timeMs: Milliseconds, requestSeekId?: number) {
 
   seekTargetTimestamp = Math.round(samples[targetIndex].cts * (1000000 / timescale));
 
-  if (frameBuffer) {
-    frameBuffer.clear(); // Clear old frames from previous scrub
-  }
-
   let keyIndex = targetIndex;
   while (keyIndex > 0 && !samples[keyIndex].is_sync) {
     keyIndex--;
   }
   
   if (seekId !== currentSeekId) return;
-  console.log(`[DecoderWorker] [${seekId}] Found target frame at index ${targetIndex}, keyframe at index ${keyIndex}`);
 
-  // macOS VideoToolbox Stall Fix:
-  // VideoDecoder.reset() is known to cause severe latency spikes (500ms+) on mac.
-  // Closing and recreating the decoder is much faster and completely clears the hardware queue.
-  if (decoder) {
-    try { decoder.close(); } catch (_) {}
-    decoder = null;
-  }
-  
   ensureDecoder();
+
+  // Reset the decoder to clear any pending frames from previous seeks/pre-buffering
+  try {
+    decoder?.reset();
+    configureDecoder();
+  } catch (e) {
+    console.error(`[DecoderWorker] [${seekId}] Decoder reset/reconfig failed:`, e);
+    decoder?.close();
+    decoder = null;
+    ensureDecoder();
+  }
 
   seekFrameTotal = targetIndex - keyIndex + 1;
   seekFrameDecoded = 0;
@@ -207,19 +201,19 @@ function ensureDecoder() {
 
   decoder = new VideoDecoder({
     output: (frame) => {
-      // Use a tolerance threshold or integer rounding because WebCodecs casts timestamps to integers internally, 
-      // whereas JS float multiplication introduces decimals.
       const timestampMs = Math.round(frame.timestamp);
       const targetMs = Math.round(seekTargetTimestamp);
       
-      // Discard intermediate delta frames that are only needed to reconstruct the target frame
-      // We allow a small 10us tolerance just in case of rounding divergence
       if (timestampMs < targetMs - 10) {
         frame.close();
         return;
       }
 
-      const isTarget = Math.abs(timestampMs - targetMs) <= 10;
+      let isTarget = false;
+      if (lastFoundTargetSeekId !== currentSeekId) {
+          isTarget = true;
+          lastFoundTargetSeekId = currentSeekId;
+      }
 
       if (frameBuffer) {
         const writeIndex = frameBuffer.reserveWriteSlot();
@@ -229,15 +223,9 @@ function ensureDecoder() {
             const frameTimeMs = (frame.timestamp / 1000) as Milliseconds;
             frame.copyTo(pixels, { format: 'RGBA' }).then(() => {
               frameBuffer?.commitWrite(frameTimeMs);
-              
-              if (isTarget) {
-                ctx.postMessage({ type: 'TARGET_READY', payload: { timeMs: frameTimeMs, index: writeIndex, seekId: currentSeekId } });
-              } else {
-                ctx.postMessage({ type: 'PREBUFFERED', payload: {} }); // Just an update, UI doesn't render it
-              }
+              ctx.postMessage({ type: 'BUFFER_READY', payload: { timeMs: frameTimeMs, index: writeIndex, seekId: currentSeekId, isTarget } });
               frame.close();
-            }).catch((err) => {
-              console.error(`[DecoderWorker] [${currentSeekId}] copyTo error:`, err);
+            }).catch(() => {
               frame.close();
             });
             return;
@@ -245,17 +233,16 @@ function ensureDecoder() {
         }
       }
 
-      // If buffer is full or missing, only fallback to ImageBitmap for the target frame (don't flood UI)
       if (isTarget) {
         createImageBitmap(frame).then(bitmap => {
-          ctx.postMessage({ type: 'FRAME', payload: { bitmap, timeMs: (frame.timestamp / 1000) } }, [bitmap]);
+          ctx.postMessage({ type: 'FRAME', payload: { bitmap, timeMs: (frame.timestamp / 1000), seekId: currentSeekId } }, [bitmap]);
           frame.close();
         });
       } else {
         frame.close();
       }
     },
-    error: (e) => console.error(`[DecoderWorker] Global Decode error:`, e)
+    error: (e) => console.error(`[DecoderWorker] [${currentSeekId}] Global Decode error:`, e)
   });
 
   configureDecoder();
