@@ -35,7 +35,7 @@ ctx.onmessage = async (e) => {
       break;
 
     case 'SEEK':
-      seekTo(payload.time as Milliseconds);
+      seekTo(payload.time as Milliseconds, payload.seekId);
       break;
 
     default:
@@ -118,8 +118,9 @@ async function initFile(file: File, loadId: number) {
   mp4boxFile.flush();
 }
 
-async function seekTo(timeMs: Milliseconds) {
-  const seekId = ++currentSeekId;
+async function seekTo(timeMs: Milliseconds, requestSeekId?: number) {
+  const seekId = requestSeekId ?? ++currentSeekId;
+  currentSeekId = seekId; // Keep internal counter in sync
   console.log(`[DecoderWorker] [${seekId}] SEEK received for ${timeMs}ms`);
   
   if (!videoTrack || samples.length === 0) {
@@ -170,7 +171,7 @@ async function seekTo(timeMs: Milliseconds) {
             const frameTimeMs = (frame.timestamp / 1000) as Milliseconds;
             frame.copyTo(pixels, { format: 'RGBA' }).then(() => {
               frameBuffer?.commitWrite(frameTimeMs);
-              ctx.postMessage({ type: 'BUFFER_READY', payload: { timeMs: frameTimeMs, index: writeIndex } });
+              ctx.postMessage({ type: 'BUFFER_READY', payload: { timeMs: frameTimeMs, index: writeIndex, seekId } });
               frame.close();
             }).catch((err) => {
               console.error(`[DecoderWorker] [${seekId}] copyTo error:`, err);

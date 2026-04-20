@@ -18,6 +18,7 @@ declare global {
 }
 
 import { FrameBufferManager } from './FrameBuffer';
+import { telemetry } from './Telemetry';
 
 class EngineService {
   private static instance: EngineService;
@@ -25,6 +26,7 @@ class EngineService {
   private onFrameCallback: ((bitmap: ImageBitmap | Uint8ClampedArray) => void) | null = null;
   private frameBuffer: FrameBufferManager | null = null;
   private activeFileKey: string | null = null;
+  private lastSeekId = 0;
 
   private constructor() {
     if (typeof window !== 'undefined') {
@@ -41,6 +43,10 @@ class EngineService {
           this.onFrameCallback(payload.bitmap);
         }
         if (type === 'BUFFER_READY' && this.onFrameCallback && this.frameBuffer) {
+          // Record frame arrival for latency tracking using the correlated seekId
+          telemetry.recordFrameReady(payload.seekId || payload.timeMs);
+          telemetry.recordBufferCount(this.frameBuffer.getStats().count);
+
           // New SharedArrayBuffer path
           const pixels = this.frameBuffer.getFrameAt(payload.timeMs);
           if (pixels) {
@@ -83,7 +89,9 @@ class EngineService {
    * Requests a frame at a specific time.
    */
   public seek(timeMs: number) {
-    this.worker?.postMessage({ type: 'SEEK', payload: { time: timeMs } });
+    const seekId = ++this.lastSeekId;
+    telemetry.recordSeek(seekId);
+    this.worker?.postMessage({ type: 'SEEK', payload: { time: timeMs, seekId } });
   }
 
   /**

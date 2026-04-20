@@ -10,6 +10,7 @@ import Timeline from '@/components/Timeline';
 import ExportModal from '@/components/ExportModal';
 import { useProjectStore } from '@/store/useProjectStore';
 import { useEditorStore } from '@/store/useEditorStore';
+import { PerformanceMonitor } from '@/components/PerformanceMonitor';
 
 export default function EditorPage() {
   const router = useRouter();
@@ -63,6 +64,8 @@ export default function EditorPage() {
         isOpen={isExportOpen}
         onClose={() => setIsExportOpen(false)}
       />
+
+      <PerformanceMonitor />
     </main>
   );
 }
