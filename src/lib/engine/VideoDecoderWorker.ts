@@ -22,6 +22,7 @@ ctx.onmessage = async (e) => {
 
   switch (type) {
     case 'INIT':
+      console.log(`[DecoderWorker] INIT received for file: ${payload.file.name}`);
       activeLoadId++;
       await initFile(payload.file, activeLoadId);
       break;
@@ -48,6 +49,7 @@ async function initFile(file: File, loadId: number) {
   mp4boxFile = MP4Box.createFile();
 
   mp4boxFile.onReady = (info: any) => {
+    console.log(`[DecoderWorker] MP4Box onReady triggered. Tracks: ${info.videoTracks.length}`);
     videoTrack = info.videoTracks[0];
     if (!videoTrack) {
       console.error('[DecoderWorker] No video track found in file.');
@@ -55,10 +57,12 @@ async function initFile(file: File, loadId: number) {
     }
     ctx.postMessage({ type: 'READY', payload: { track: videoTrack } });
     mp4boxFile.setExtractionOptions(videoTrack.id, null, { nbSamples: 1000 });
+    console.log(`[DecoderWorker] Starting extraction for track ${videoTrack.id}`);
     mp4boxFile.start();
   };
 
   mp4boxFile.onSamples = (_id: number, _user: any, fetchedSamples: any[]) => {
+    console.log(`[DecoderWorker] MP4Box onSamples: received ${fetchedSamples.length} new samples`);
     for (let i = 0; i < fetchedSamples.length; i++) {
       samples.push(fetchedSamples[i]);
     }
@@ -75,6 +79,7 @@ async function initFile(file: File, loadId: number) {
     console.error('[DecoderWorker] MP4Box Error:', e);
   };
 
+  console.log('[DecoderWorker] Starting file stream read loop...');
   const reader = file.stream().getReader();
   let offset = 0;
   while (true) {
@@ -96,13 +101,15 @@ async function initFile(file: File, loadId: number) {
     }
   }
 
+  console.log('[DecoderWorker] File read loop complete. Calling flush().');
   mp4boxFile.flush();
 }
 
 async function seekTo(timeMs: Milliseconds) {
-  if (!videoTrack) return;
-
-  if (samples.length === 0) {
+  console.log(`[DecoderWorker] SEEK received for ${timeMs}ms`);
+  
+  if (!videoTrack || samples.length === 0) {
+    console.log(`[DecoderWorker] SEEK deferred: track ready=${!!videoTrack}, samples=${samples.length}`);
     pendingSeekMs = timeMs;
     return;
   }
@@ -120,6 +127,8 @@ async function seekTo(timeMs: Milliseconds) {
   while (keyIndex > 0 && !samples[keyIndex].is_sync) {
     keyIndex--;
   }
+  
+  console.log(`[DecoderWorker] Found target frame at index ${targetIndex}, keyframe at index ${keyIndex}`);
 
   if (decoder) {
     decoder.close();
@@ -132,8 +141,10 @@ async function seekTo(timeMs: Milliseconds) {
   decoder = new VideoDecoder({
     output: (frame) => {
       seekFrameDecoded++;
+      console.log(`[DecoderWorker] Decoded frame ${seekFrameDecoded}/${seekFrameTotal}`);
 
       if (seekFrameDecoded === seekFrameTotal) {
+        console.log(`[DecoderWorker] Emitting target frame for ${timeMs}ms`);
         createImageBitmap(frame).then(bitmap => {
           ctx.postMessage({ type: 'FRAME', payload: { bitmap, timeMs } }, [bitmap]);
           frame.close();
@@ -160,6 +171,12 @@ async function seekTo(timeMs: Milliseconds) {
       duration: s.duration * (1000000 / timescale),
       data: s.data
     }));
+  }
+
+  try {
+    await decoder.flush();
+  } catch (err) {
+    console.error('[DecoderWorker] Flush error:', err);
   }
 }
 
