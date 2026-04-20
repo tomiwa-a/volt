@@ -6,6 +6,7 @@ import { useEditorStore } from '@/store/useEditorStore';
 import { engine } from '@/lib/engine/EngineService';
 import { mediaService } from '@/lib/media/MediaService';
 import { formatTimecode } from '@/lib/utils/timecode';
+import { ms } from '@/types/units';
 import { AlignCenter, Type as TextIcon, RotateCw, Lock, ShieldAlert, Film, Video } from 'lucide-react';
 
 interface CanvasProps {
@@ -13,8 +14,14 @@ interface CanvasProps {
 }
 
 export default function Canvas({ projectName }: CanvasProps) {
-  const { resolution, fps, assets } = useProjectStore();
-  const { currentTime, duration } = useEditorStore();
+  const { resolution, fps, assets, tracks } = useProjectStore();
+  const { currentTime } = useEditorStore();
+
+  const calculatedDuration = tracks.reduce((max, t) => {
+    const trackMax = t.clips.reduce((cMax, c) => Math.max(cMax, Number(c.startTime) + Number(c.duration)), 0);
+    return Math.max(max, trackMax);
+  }, 0);
+  const projectDuration = Math.max(calculatedDuration, 30000);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [needsPermission, setNeedsPermission] = useState(false);
   const [hasFrame, setHasFrame] = useState(false);
@@ -195,8 +202,8 @@ export default function Canvas({ projectName }: CanvasProps) {
             {formatTimecode(currentTime, fps)}
           </span>
           <span style={{ color: '#2a2a2a' }}>/</span>
-          <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#444' }}>
-            {formatTimecode(duration, fps)}
+          <span className="font-mono text-[11px] text-[#444]">
+            {formatTimecode(ms(projectDuration), fps)}
           </span>
         </div>
       </div>

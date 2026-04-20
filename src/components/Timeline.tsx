@@ -36,6 +36,7 @@ export default function Timeline({ projectName }: TimelineProps) {
 
   // Ref for the track area container to measure mouse positions
   const trackAreaRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isScrubbingRef = useRef(false);
   const lastTimeRef = useRef<number | null>(null);
   const requestRef = useRef<number | undefined>(undefined);
@@ -82,6 +83,22 @@ export default function Timeline({ projectName }: TimelineProps) {
       if (state.isPlaying) {
         const nextTime = ms(Number(state.currentTime) + delta);
         state.setCurrentTime(nextTime, fps);
+
+        // Auto-scroll timeline to keep playhead in view
+        if (scrollContainerRef.current) {
+          const container = scrollContainerRef.current;
+          const playheadLeft = 64 + msToPx(nextTime, state.zoomLevel);
+          const scrollLeft = container.scrollLeft;
+          const width = container.clientWidth;
+          const rightThreshold = scrollLeft + width - 100;
+          const leftThreshold = scrollLeft + 64;
+
+          if (playheadLeft > rightThreshold) {
+            container.scrollLeft = playheadLeft - width + 100;
+          } else if (playheadLeft < leftThreshold) {
+            container.scrollLeft = Math.max(0, playheadLeft - 100);
+          }
+        }
       }
     }
     lastTimeRef.current = time;
@@ -115,11 +132,40 @@ export default function Timeline({ projectName }: TimelineProps) {
     });
   };
 
-  const rulerMarks = Array.from({ length: 11 }, (_, i) => {
-    const time = i * 5000; // Every 5 seconds
+  // Calculate dynamic ruler intervals based on zoom to prevent overlap
+  const pxPerSecond = msToPx(ms(1000), zoomLevel);
+  let intervalMs = 1000; // 1 second
+  if (pxPerSecond * 1 < 40) intervalMs = 5000; // 5 seconds
+  if (pxPerSecond * 5 < 40) intervalMs = 15000; // 15s
+  if (pxPerSecond * 15 < 40) intervalMs = 30000; // 30s
+  if (pxPerSecond * 30 < 40) intervalMs = 60000; // 1 min
+  if (pxPerSecond * 60 < 40) intervalMs = 300000; // 5 mins
+  if (pxPerSecond * 300 < 40) intervalMs = 600000; // 10 mins
+  if (pxPerSecond * 600 < 40) intervalMs = 900000; // 15 mins
+  if (pxPerSecond * 900 < 40) intervalMs = 1800000; // 30 mins
+
+  // Calculate actual project duration from clips
+  const calculatedDuration = tracks.reduce((max, t) => {
+    const trackMax = t.clips.reduce((cMax, c) => Math.max(cMax, Number(c.startTime) + Number(c.duration)), 0);
+    return Math.max(max, trackMax);
+  }, 0);
+  const projectDuration = Math.max(calculatedDuration, 30000); // Minimum 30 seconds
+  const numMarks = Math.ceil(projectDuration / intervalMs) + 2;
+
+  const rulerMarks = Array.from({ length: numMarks }, (_, i) => {
+    const time = i * intervalMs;
+    // Show M:SS or H:MM:SS
+    const totalSecs = Math.floor(time / 1000);
+    const m = Math.floor(totalSecs / 60);
+    const s = totalSecs % 60;
+    const h = Math.floor(m / 60);
+    const label = h > 0 
+      ? `${h}:${String(m % 60).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+      : `${m}:${String(s).padStart(2, '0')}`;
+
     return {
       time,
-      label: `${Math.floor(time / 1000)}s`,
+      label,
       left: msToPx(ms(time), zoomLevel)
     };
   });
@@ -148,7 +194,7 @@ export default function Timeline({ projectName }: TimelineProps) {
           <div className="flex items-center gap-1.5 text-[11px] font-mono text-gray-500">
             <span className="text-gray-900 font-semibold">{formatTimecode(currentTime, fps)}</span>
             <span className="text-gray-300">/</span>
-            <span>00:00:30:00</span>
+            <span>{formatTimecode(ms(projectDuration), fps)}</span>
             <span className="ml-1 text-gray-300 font-sans">·</span>
             <span>{fps} fps</span>
           </div>
@@ -214,12 +260,13 @@ export default function Timeline({ projectName }: TimelineProps) {
 
       {/* ── Track area ── */}
       {!isCollapsed && (
-        <div 
-          ref={trackAreaRef}
-          onMouseDown={handleMouseDown}
-          className="flex flex-col relative select-none" 
-          style={{ height: 180 }}
-        >
+        <div ref={scrollContainerRef} className="flex flex-col relative overflow-x-auto overflow-y-hidden" style={{ height: 180 }}>
+          <div 
+            ref={trackAreaRef}
+            onMouseDown={handleMouseDown}
+            className="flex flex-col h-full relative select-none" 
+            style={{ minWidth: `max(100%, ${64 + msToPx(ms(projectDuration), zoomLevel) + 100}px)` }}
+          >
           {/* Ruler */}
           <div className="flex-shrink-0 h-6 border-b border-gray-100 bg-gray-50 flex items-center relative overflow-hidden">
             <div className="absolute inset-0 pl-16">
@@ -247,8 +294,11 @@ export default function Timeline({ projectName }: TimelineProps) {
                   </div>
                   {/* Clip area */}
                   <div className="flex-1 relative bg-gray-50 group/track">
-                    {/* Grid lines (simplified) */}
-                    <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundSize: `${msToPx(ms(1000), zoomLevel)}px 100%`, backgroundImage: 'linear-gradient(to right, #ccc 1px, transparent 1px)' }} />
+                    {/* Grid lines (synchronized with ruler) */}
+                    <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ 
+                      backgroundSize: `${msToPx(ms(intervalMs), zoomLevel)}px 100%`, 
+                      backgroundImage: 'linear-gradient(to right, #ccc 1px, transparent 1px)' 
+                    }} />
                     
                     {t.clips.map(clip => {
                       const asset = assets.find(a => a.id === clip.assetId);
@@ -285,6 +335,7 @@ export default function Timeline({ projectName }: TimelineProps) {
             <div className="absolute -top-1 -left-[5px] w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[8px] border-t-red-600" />
           </div>
         </div>
+        </div>
       )}
 
       {/* ── Playback controls ── */}
@@ -318,16 +369,21 @@ export default function Timeline({ projectName }: TimelineProps) {
         {/* Zoom */}
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-semibold text-gray-400 tracking-tight">Zoom</span>
-          <input
+            <input
             type="range"
-            min="10"
-            max="400"
-            value={zoomLevel}
-            onChange={(e) => setZoomLevel(parseInt(e.target.value))}
+            min="0"
+            max="100"
+            step="0.1"
+            value={100 * Math.log(zoomLevel / 0.01) / Math.log(400 / 0.01)}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value);
+              const z = 0.01 * Math.pow(400 / 0.01, v / 100);
+              setZoomLevel(z);
+            }}
             className="w-24 h-1 bg-gray-200 rounded-full appearance-none cursor-pointer accent-gray-900"
             title="Timeline zoom"
           />
-          <span className="text-[10px] font-mono text-gray-400 w-8">{zoomLevel}%</span>
+          <span className="text-[10px] font-mono text-gray-400 w-10">{zoomLevel < 1 ? zoomLevel.toFixed(2) : Math.round(zoomLevel)}%</span>
         </div>
       </div>
     </div>
