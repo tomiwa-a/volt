@@ -1,0 +1,39 @@
+{
+  "name": "volt",
+  "version": "1.0.0",
+  "description": "![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg) ![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg) ![Go](https://img.shields.io/badge/Language-Go-00ADD8.svg?logo=go&logoColor=white) ![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6.svg?logo=typescript&logoColor=white) [![Twitter](https://img.shields.io/badge/Twitter-tomiwa__amole-1DA1F2.svg?logo=twitter&logoColor=white)](https://twitter.com/tomiwa_amole)",
+  "main": "index.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "build:wasm": "GOOS=js GOARCH=wasm go build -o public/engine.wasm engine/main.go"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tomiwa-a/volt.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/tomiwa-a/volt/issues"
+  },
+  "homepage": "https://github.com/tomiwa-a/volt#readme",
+  "dependencies": {
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "autoprefixer": "^10.5.0",
+    "dexie": "^4.4.2",
+    "lucide-react": "^1.8.0",
+    "next": "^16.2.4",
+    "postcss": "^8.5.10",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^6.0.3",
+    "zustand": "^5.0.12"
+  }
+}
