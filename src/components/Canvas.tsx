@@ -64,27 +64,70 @@ export default function Canvas({ projectName }: CanvasProps) {
     }
   }, []);
 
+  const renderBufferRef = useRef<Uint8ClampedArray | null>(null);
+
   useEffect(() => {
     engine.onFrame((data) => {
       if (!canvasRef.current || !ctxRef.current) return;
       const canvas = canvasRef.current;
       const ctx = ctxRef.current;
-      setHasFrame(true);
-
       if (data instanceof ImageBitmap) {
         ctx.drawImage(data, 0, 0, canvas.width, canvas.height);
         data.close();
+        if (!hasFrame) setHasFrame(true);
       } else {
-        // Raw pixels from SharedArrayBuffer
-        // We cast to any to bypass TS strictly checking for non-shared ArrayBuffer
-        const imageData = new ImageData(data as any, resolution.width, resolution.height);
-        ctx.putImageData(imageData, 0, 0);
+        // Raw pixels from SharedArrayBuffer — stored at Fixed Stride, retrieve the actual video dimensions
+        const pixels = data as Uint8ClampedArray;
+        const { width, height } = engine.getDimensions();
+        const requiredSize = width * height * 4;
+        
+        // Ensure our non-shared rendering buffer is large enough
+        if (!renderBufferRef.current || renderBufferRef.current.length < requiredSize) {
+          renderBufferRef.current = new Uint8ClampedArray(requiredSize);
+        }
+        
+        // Copy only the valid pixel data from the shared slot (ignore padding)
+        renderBufferRef.current.set(pixels.subarray(0, requiredSize));
+        
+        // Build ImageData at the native video size, then scale-draw to fill the canvas.
+        // putImageData does NOT scale — it draws pixel-perfect at (0,0), leaving black bars.
+        const imageData = new ImageData(renderBufferRef.current.subarray(0, requiredSize) as any, width, height);
+        createImageBitmap(imageData).then((bitmap) => {
+          if (ctx && canvas) {
+            ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+            bitmap.close();
+          }
+        });
+
+        // Mark as having received a frame only after successful render
+        if (!hasFrame) setHasFrame(true);
       }
     });
   }, []);
 
+  const lastSeekTimeRef = useRef(0);
+  const seekThrottleIdRef = useRef<any>(null);
+
   useEffect(() => {
-    engine.seek(Number(currentTime));
+    const now = performance.now();
+    const timeSinceLastSeek = now - lastSeekTimeRef.current;
+    const targetTime = Number(currentTime);
+
+    if (timeSinceLastSeek > 32) {
+      engine.seek(targetTime);
+      lastSeekTimeRef.current = now;
+      if (seekThrottleIdRef.current) clearTimeout(seekThrottleIdRef.current);
+    } else {
+      if (seekThrottleIdRef.current) clearTimeout(seekThrottleIdRef.current);
+      seekThrottleIdRef.current = setTimeout(() => {
+        engine.seek(targetTime);
+        lastSeekTimeRef.current = performance.now();
+      }, 32 - timeSinceLastSeek);
+    }
+
+    return () => {
+      if (seekThrottleIdRef.current) clearTimeout(seekThrottleIdRef.current);
+    };
   }, [currentTime]);
 
   return (

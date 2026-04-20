@@ -16,6 +16,7 @@ let samples: any[] = [];
 let activeLoadId = 0;
 let pendingSeekMs: Milliseconds | null = null;
 
+let currentSeekId = 0;
 let seekFrameTotal = 0;
 let seekFrameDecoded = 0;
 
@@ -26,6 +27,7 @@ ctx.onmessage = async (e) => {
     case 'INIT':
       console.log(`[DecoderWorker] INIT received for file: ${payload.file.name}`);
       activeLoadId++;
+      currentSeekId = 0;
       if (payload.sharedBuffer) {
         frameBuffer = new FrameBufferManager(payload.sharedBuffer);
       }
@@ -33,7 +35,7 @@ ctx.onmessage = async (e) => {
       break;
 
     case 'SEEK':
-      await seekTo(payload.time as Milliseconds);
+      seekTo(payload.time as Milliseconds);
       break;
 
     default:
@@ -60,6 +62,12 @@ async function initFile(file: File, loadId: number) {
       console.error('[DecoderWorker] No video track found in file.');
       return;
     }
+    
+    // Update dimensions in the SharedArrayBuffer header
+    if (frameBuffer) {
+      frameBuffer.setDimensions(videoTrack.video.width, videoTrack.video.height);
+    }
+
     ctx.postMessage({ type: 'READY', payload: { track: videoTrack } });
     mp4boxFile.setExtractionOptions(videoTrack.id, null, { nbSamples: 1000 });
     console.log(`[DecoderWorker] Starting extraction for track ${videoTrack.id}`);
@@ -111,10 +119,11 @@ async function initFile(file: File, loadId: number) {
 }
 
 async function seekTo(timeMs: Milliseconds) {
-  console.log(`[DecoderWorker] SEEK received for ${timeMs}ms`);
+  const seekId = ++currentSeekId;
+  console.log(`[DecoderWorker] [${seekId}] SEEK received for ${timeMs}ms`);
   
   if (!videoTrack || samples.length === 0) {
-    console.log(`[DecoderWorker] SEEK deferred: track ready=${!!videoTrack}, samples=${samples.length}`);
+    console.log(`[DecoderWorker] [${seekId}] SEEK deferred: track ready=${!!videoTrack}, samples=${samples.length}`);
     pendingSeekMs = timeMs;
     return;
   }
@@ -133,49 +142,52 @@ async function seekTo(timeMs: Milliseconds) {
     keyIndex--;
   }
   
-  console.log(`[DecoderWorker] Found target frame at index ${targetIndex}, keyframe at index ${keyIndex}`);
+  if (seekId !== currentSeekId) return;
+  console.log(`[DecoderWorker] [${seekId}] Found target frame at index ${targetIndex}, keyframe at index ${keyIndex}`);
 
   if (decoder) {
-    decoder.close();
+    try { decoder.close(); } catch (_) {}
     decoder = null;
   }
 
   seekFrameTotal = targetIndex - keyIndex + 1;
   seekFrameDecoded = 0;
 
+  // Always create a fresh decoder so the output closure captures the CURRENT seekId.
+  // Reusing via reset() causes a stale-closure bug where all frames get discarded.
   decoder = new VideoDecoder({
     output: (frame) => {
-      seekFrameDecoded++;
-      console.log(`[DecoderWorker] Decoded frame ${seekFrameDecoded}/${seekFrameTotal}`);
+      if (seekId !== currentSeekId) {
+        frame.close();
+        return;
+      }
 
-      if (seekFrameDecoded === seekFrameTotal) {
-        console.log(`[DecoderWorker] Emitting target frame for ${timeMs}ms`);
-
-        if (frameBuffer) {
-          const writeIndex = frameBuffer.getWriteIndex();
-          if (writeIndex !== null) {
-            const pixels = frameBuffer.getFrameAt(timeMs);
-            if (pixels) {
-              frame.copyTo(pixels).then(() => {
-                frameBuffer?.commitWrite(timeMs);
-                ctx.postMessage({ type: 'BUFFER_READY', payload: { timeMs, index: writeIndex } });
-                frame.close();
-              });
-              return;
-            }
+      if (frameBuffer) {
+        const writeIndex = frameBuffer.getWriteIndex();
+        if (writeIndex !== null) {
+          const pixels = frameBuffer.getWriteBuffer(writeIndex);
+          if (pixels) {
+            const frameTimeMs = (frame.timestamp / 1000) as Milliseconds;
+            frame.copyTo(pixels, { format: 'RGBA' }).then(() => {
+              frameBuffer?.commitWrite(frameTimeMs);
+              ctx.postMessage({ type: 'BUFFER_READY', payload: { timeMs: frameTimeMs, index: writeIndex } });
+              frame.close();
+            }).catch((err) => {
+              console.error(`[DecoderWorker] [${seekId}] copyTo error:`, err);
+              frame.close();
+            });
+            return;
           }
         }
-
-        // Fallback to legacy ImageBitmap if no buffer or buffer full
-        createImageBitmap(frame).then(bitmap => {
-          ctx.postMessage({ type: 'FRAME', payload: { bitmap, timeMs } }, [bitmap]);
-          frame.close();
-        });
-      } else {
-        frame.close();
       }
+
+      // Fallback to ImageBitmap if buffer is full or unavailable
+      createImageBitmap(frame).then(bitmap => {
+        ctx.postMessage({ type: 'FRAME', payload: { bitmap, timeMs: (frame.timestamp / 1000) } }, [bitmap]);
+        frame.close();
+      });
     },
-    error: (e) => console.error('[DecoderWorker] Decode error:', e)
+    error: (e) => console.error(`[DecoderWorker] [${seekId}] Decode error:`, e)
   });
 
   decoder.configure({
@@ -185,7 +197,9 @@ async function seekTo(timeMs: Milliseconds) {
     description: getExtraData(mp4boxFile)
   });
 
+  // Start decoding from keyframe to target
   for (let i = keyIndex; i <= targetIndex; i++) {
+    if (seekId !== currentSeekId) break;
     const s = samples[i];
     decoder.decode(new EncodedVideoChunk({
       type: s.is_sync ? 'key' : 'delta',
@@ -195,10 +209,28 @@ async function seekTo(timeMs: Milliseconds) {
     }));
   }
 
-  try {
-    await decoder.flush();
-  } catch (err) {
-    console.error('[DecoderWorker] Flush error:', err);
+  // Pre-buffer: Continue decoding after the target
+  // We'll decode a decent headless chunk (e.g. 60 frames or ~1 second)
+  const prebufferCount = 60;
+  for (let i = targetIndex + 1; i < Math.min(samples.length, targetIndex + 1 + prebufferCount); i++) {
+    if (seekId !== currentSeekId) break;
+    const s = samples[i];
+    decoder.decode(new EncodedVideoChunk({
+      type: s.is_sync ? 'key' : 'delta',
+      timestamp: s.cts * (1000000 / timescale),
+      duration: s.duration * (1000000 / timescale),
+      data: s.data
+    }));
+  }
+
+  if (seekId === currentSeekId) {
+    try {
+      await decoder.flush();
+    } catch (err) {
+      if (seekId === currentSeekId) {
+        console.error(`[DecoderWorker] [${seekId}] Flush error:`, err);
+      }
+    }
   }
 }
 

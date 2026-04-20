@@ -52,6 +52,8 @@ export class FrameBufferManager {
     return this.buffer;
   }
 
+  private static FIXED_STRIDE = 1920 * 1080 * 4;
+
   /**
    * Worker: Get the next slot index to write into.
    * Blocks if buffer is full.
@@ -63,6 +65,14 @@ export class FrameBufferManager {
 
     if (count >= capacity) return null;
     return head;
+  }
+
+  /**
+   * Worker: Get the raw buffer for a specific slot index.
+   */
+  public getWriteBuffer(index: number): Uint8ClampedArray {
+    const start = index * FrameBufferManager.FIXED_STRIDE;
+    return this.frameData.subarray(start, start + FrameBufferManager.FIXED_STRIDE);
   }
 
   /**
@@ -89,12 +99,8 @@ export class FrameBufferManager {
     if (count === 0) return null;
 
     const tail = Atomics.load(this.header, FrameBufferManager.TAIL);
-    const width = Atomics.load(this.header, FrameBufferManager.WIDTH);
-    const height = Atomics.load(this.header, FrameBufferManager.HEIGHT);
-    const frameSize = width * height * 4;
-
-    const start = tail * frameSize;
-    return this.frameData.subarray(start, start + frameSize);
+    const start = tail * FrameBufferManager.FIXED_STRIDE;
+    return this.frameData.subarray(start, start + FrameBufferManager.FIXED_STRIDE);
   }
 
   /**
@@ -114,6 +120,24 @@ export class FrameBufferManager {
     Atomics.store(this.header, FrameBufferManager.HEAD, 0);
     Atomics.store(this.header, FrameBufferManager.TAIL, 0);
     Atomics.store(this.header, FrameBufferManager.COUNT, 0);
+  }
+
+  /**
+   * Worker: Update the resolution in the header.
+   */
+  public setDimensions(width: number, height: number) {
+    Atomics.store(this.header, FrameBufferManager.WIDTH, width);
+    Atomics.store(this.header, FrameBufferManager.HEIGHT, height);
+  }
+
+  /**
+   * UI: Get the current video dimensions from the buffer.
+   */
+  public getDimensions() {
+    return {
+      width: Atomics.load(this.header, FrameBufferManager.WIDTH),
+      height: Atomics.load(this.header, FrameBufferManager.HEIGHT),
+    };
   }
 
   public getStats() {

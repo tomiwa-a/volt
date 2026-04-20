@@ -24,6 +24,7 @@ class EngineService {
   private worker: Worker | null = null;
   private onFrameCallback: ((bitmap: ImageBitmap | Uint8ClampedArray) => void) | null = null;
   private frameBuffer: FrameBufferManager | null = null;
+  private activeFileKey: string | null = null;
 
   private constructor() {
     if (typeof window !== 'undefined') {
@@ -44,7 +45,8 @@ class EngineService {
           const pixels = this.frameBuffer.getFrameAt(payload.timeMs);
           if (pixels) {
             this.onFrameCallback(pixels);
-            // We can advance the buffer here or after rendering
+            // Re-release the slot after the UI has processed it
+            this.frameBuffer.advance(1);
           }
         }
       };
@@ -62,6 +64,11 @@ class EngineService {
    * Initializes the decoder for a specific file.
    */
   public async loadFile(file: File) {
+    // Deduplicate: ignore if already loading this exact file
+    const key = `${file.name}-${file.size}-${file.lastModified}`;
+    if (key === this.activeFileKey) return;
+    this.activeFileKey = key;
+
     this.frameBuffer?.clear();
     this.worker?.postMessage({ 
       type: 'INIT', 
@@ -93,6 +100,10 @@ class EngineService {
       version: '0.1.0',
       buffer: this.frameBuffer?.getStats()
     }; 
+  }
+
+  public getDimensions() {
+    return this.frameBuffer?.getDimensions() || { width: 1920, height: 1080 };
   }
   public render(index: number) { return null; }
   public async init() { return Promise.resolve(); }
