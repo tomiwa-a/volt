@@ -83,27 +83,31 @@ export default function Timeline({ projectName }: TimelineProps) {
       if (state.isPlaying) {
         const nextTime = ms(Number(state.currentTime) + delta);
         state.setCurrentTime(nextTime, fps);
-
-        // Auto-scroll timeline to keep playhead in view
-        if (scrollContainerRef.current) {
-          const container = scrollContainerRef.current;
-          const playheadLeft = 64 + msToPx(nextTime, state.zoomLevel);
-          const scrollLeft = container.scrollLeft;
-          const width = container.clientWidth;
-          const rightThreshold = scrollLeft + width - 100;
-          const leftThreshold = scrollLeft + 64;
-
-          if (playheadLeft > rightThreshold) {
-            container.scrollLeft = playheadLeft - width + 100;
-          } else if (playheadLeft < leftThreshold) {
-            container.scrollLeft = Math.max(0, playheadLeft - 100);
-          }
-        }
       }
     }
     lastTimeRef.current = time;
     requestRef.current = requestAnimationFrame(animate);
   }, [fps]);
+
+  // Auto-scroll timeline to keep playhead in view (Play + Pause + Scrub)
+  useEffect(() => {
+    if (!scrollContainerRef.current) return;
+    
+    const container = scrollContainerRef.current;
+    const playheadLeft = 64 + msToPx(currentTime, zoomLevel);
+    const scrollLeft = container.scrollLeft;
+    const width = container.clientWidth;
+    
+    // Thresholds: 100px from right, 64px from left (the label area)
+    const rightThreshold = scrollLeft + width - 100;
+    const leftThreshold = scrollLeft + 64;
+
+    if (playheadLeft > rightThreshold) {
+      container.scrollLeft = playheadLeft - width + 100;
+    } else if (playheadLeft < leftThreshold) {
+      container.scrollLeft = Math.max(0, playheadLeft - 100);
+    }
+  }, [currentTime, zoomLevel]);
 
   useEffect(() => {
     requestRef.current = requestAnimationFrame(animate);
