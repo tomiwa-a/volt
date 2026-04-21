@@ -326,7 +326,10 @@ function ensureDecoder() {
           lastFoundTargetSeekId = currentSeekId;
       }
 
-      if (frameBuffer) {
+      const requiredSize = timestampMs === targetMs ? 0 : (frame.displayWidth * frame.displayHeight * 4);
+      const canFitInBuffer = requiredSize <= FrameBufferManager.FIXED_STRIDE;
+
+      if (frameBuffer && canFitInBuffer) {
         const writeIndex = frameBuffer.reserveWriteSlot();
         if (writeIndex !== null) {
           const pixels = frameBuffer.getWriteBuffer(writeIndex);
@@ -344,6 +347,7 @@ function ensureDecoder() {
         }
       }
 
+      // Fallback for overflow (4K) or if buffer is full: Use ImageBitmap (Slower but avoids corruption)
       if (isTarget) {
         createImageBitmap(frame).then(bitmap => {
           ctx.postMessage({ type: 'FRAME', payload: { bitmap, timeMs: (frame.timestamp / 1000), seekId: currentSeekId } }, [bitmap]);

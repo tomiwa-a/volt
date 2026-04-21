@@ -67,7 +67,10 @@ class EngineService {
       this.worker = null;
     }
     this.isPlaybackActive = false;
-    this.frameBuffer?.clear();
+    this.activeFileKey = null;
+    this.lastSeekId = 0;
+    this.frameBuffer?.wipe();
+    telemetry.reset();
   }
 
   public static getInstance(): EngineService {

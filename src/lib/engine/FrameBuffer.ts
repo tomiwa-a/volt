@@ -52,7 +52,7 @@ export class FrameBufferManager {
     return this.buffer;
   }
 
-  private static FIXED_STRIDE = 1920 * 1080 * 4;
+  public static readonly FIXED_STRIDE = 1920 * 1080 * 4;
 
   /**
    * Worker: Atomically reserve the next available slot index to write into.
@@ -136,6 +136,18 @@ export class FrameBufferManager {
   public clear() {
     Atomics.store(this.header, FrameBufferManager.HEAD, 0);
     Atomics.store(this.header, FrameBufferManager.TAIL, 0);
+  }
+
+  /**
+   * Completely zero out the entire SharedArrayBuffer memory.
+   * Use this when shutting down the engine to prevent corruption leaks.
+   */
+  public wipe() {
+    this.clear();
+    // Zero-fill the data region
+    this.frameData.fill(0);
+    // Zero-fill the metadata region
+    this.metadata.fill(0);
   }
 
   /**
