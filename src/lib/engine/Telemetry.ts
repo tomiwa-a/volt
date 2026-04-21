@@ -34,6 +34,18 @@ class TelemetryManager {
     return TelemetryManager.instance;
   }
 
+  public reset() {
+    this.metrics = {
+      decodeLatency: [],
+      jitter: [],
+      bufferCount: [],
+      wasmTime: [],
+      jsTime: [],
+    };
+    this.lastFrameTime = 0;
+    this.pendingSeeks.clear();
+  }
+
   public recordSeek(id: string | number) {
     this.pendingSeeks.set(id, performance.now());
   }

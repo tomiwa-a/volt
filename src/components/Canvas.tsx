@@ -15,7 +15,7 @@ interface CanvasProps {
 
 export default function Canvas({ projectName }: CanvasProps) {
   const { resolution, fps, assets, tracks } = useProjectStore();
-  const { currentTime } = useEditorStore();
+  const { currentTime, isPlaying } = useEditorStore();
 
   const calculatedDuration = tracks.reduce((max, t) => {
     const trackMax = t.clips.reduce((cMax, c) => Math.max(cMax, Number(c.startTime) + Number(c.duration)), 0);
@@ -65,6 +65,8 @@ export default function Canvas({ projectName }: CanvasProps) {
   }, []);
 
   const renderBufferRef = useRef<Uint8ClampedArray | null>(null);
+  const imageDataRef = useRef<ImageData | null>(null);
+  const lastDimsRef = useRef<{w: number, h: number}>({w: 0, h: 0});
 
   useEffect(() => {
     engine.onFrame((data) => {
@@ -81,18 +83,18 @@ export default function Canvas({ projectName }: CanvasProps) {
         const { width, height } = engine.getDimensions();
         const requiredSize = width * height * 4;
         
-        // Ensure our non-shared rendering buffer is large enough
-        if (!renderBufferRef.current || renderBufferRef.current.length < requiredSize) {
+        // Reuse the render buffer and ImageData to avoid GC pressure (~108MB/s of garbage otherwise)
+        if (!renderBufferRef.current || lastDimsRef.current.w !== width || lastDimsRef.current.h !== height) {
           renderBufferRef.current = new Uint8ClampedArray(requiredSize);
+          imageDataRef.current = new ImageData(renderBufferRef.current as unknown as Uint8ClampedArray<ArrayBuffer>, width, height);
+          lastDimsRef.current = { w: width, h: height };
         }
         
         // Copy only the valid pixel data from the shared slot (ignore padding)
         renderBufferRef.current.set(pixels.subarray(0, requiredSize));
         
-        // Build ImageData at the native video size, then scale-draw to fill the canvas.
-        // putImageData does NOT scale — it draws pixel-perfect at (0,0), leaving black bars.
-        const imageData = new ImageData(renderBufferRef.current.subarray(0, requiredSize) as any, width, height);
-        createImageBitmap(imageData).then((bitmap) => {
+        // Reuse ImageData — the backing buffer was already updated above
+        createImageBitmap(imageDataRef.current!).then((bitmap) => {
           if (ctx && canvas) {
             ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
             bitmap.close();
@@ -107,8 +109,25 @@ export default function Canvas({ projectName }: CanvasProps) {
 
   const lastSeekTimeRef = useRef(0);
   const seekThrottleIdRef = useRef<any>(null);
+  const wasPlayingRef = useRef(false);
 
+  // Notify the worker when playback starts/stops
   useEffect(() => {
+    const targetTime = Number(currentTime);
+    if (isPlaying && !wasPlayingRef.current) {
+      // Playback just started — tell the worker to enter continuous mode
+      engine.play(targetTime, fps);
+    } else if (!isPlaying && wasPlayingRef.current) {
+      // Playback just stopped — tell the worker to stop continuous mode
+      engine.stop();
+    }
+    wasPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  // During scrubbing (not playing), seek on demand
+  useEffect(() => {
+    if (isPlaying) return; // Worker drives playback, not us
+
     const now = performance.now();
     const timeSinceLastSeek = now - lastSeekTimeRef.current;
     const targetTime = Number(currentTime);
@@ -128,7 +147,7 @@ export default function Canvas({ projectName }: CanvasProps) {
     return () => {
       if (seekThrottleIdRef.current) clearTimeout(seekThrottleIdRef.current);
     };
-  }, [currentTime]);
+  }, [currentTime, isPlaying]);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden min-h-0 relative" style={{ background: '#0f0f0f' }}>

@@ -46,12 +46,12 @@ class EngineService {
           telemetry.recordFrameReady(payload.seekId || payload.timeMs);
           telemetry.recordBufferCount(this.frameBuffer.getStats().count);
 
-          // But only render the target frame to the canvas
-          if (payload.isTarget && this.onFrameCallback) {
+          // During playback, render every frame. During scrubbing, only render the target.
+          const shouldRender = this.isPlaybackActive || payload.isTarget;
+          if (shouldRender && this.onFrameCallback) {
             const pixels = this.frameBuffer.getFrameAt(payload.timeMs);
             if (pixels) {
               this.onFrameCallback(pixels);
-              this.frameBuffer.advance(1);
             }
           }
         }
@@ -87,13 +87,31 @@ class EngineService {
     });
   }
 
+  private isPlaybackActive = false;
+
   /**
-   * Requests a frame at a specific time.
+   * Requests a frame at a specific time (for scrubbing only).
    */
   public seek(timeMs: number) {
     const seekId = ++this.lastSeekId;
     telemetry.recordSeek(seekId);
     this.worker?.postMessage({ type: 'SEEK', payload: { time: timeMs, seekId } });
+  }
+
+  /**
+   * Start continuous playback from a given time.
+   */
+  public play(timeMs: number, fps: number) {
+    this.isPlaybackActive = true;
+    this.worker?.postMessage({ type: 'PLAY', payload: { time: timeMs, fps } });
+  }
+
+  /**
+   * Stop continuous playback.
+   */
+  public stop() {
+    this.isPlaybackActive = false;
+    this.worker?.postMessage({ type: 'STOP' });
   }
 
   /**
@@ -117,6 +135,7 @@ class EngineService {
   }
   public render(index: number) { return null; }
   public async init() { return Promise.resolve(); }
+
 }
 
 export const engine = EngineService.getInstance();
