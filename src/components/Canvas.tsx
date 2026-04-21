@@ -107,6 +107,13 @@ export default function Canvas({ projectName }: CanvasProps) {
     });
   }, []);
 
+  // During playback (Playing), PULL the frame from the engine to ensure perfect sync
+  useEffect(() => {
+    if (isPlaying) {
+      engine.requestFrame(Number(currentTime));
+    }
+  }, [currentTime, isPlaying]);
+
   const lastSeekTimeRef = useRef(0);
   const seekThrottleIdRef = useRef<any>(null);
   const wasPlayingRef = useRef(false);
@@ -124,13 +131,24 @@ export default function Canvas({ projectName }: CanvasProps) {
     wasPlayingRef.current = isPlaying;
   }, [isPlaying]);
 
-  // During scrubbing (not playing), seek on demand
+  // Handle manual seeks (clicks/scrubbing)
   useEffect(() => {
-    if (isPlaying) return; // Worker drives playback, not us
+    const targetTime = Number(currentTime);
+
+    // If we are playing, and the time jump is large, we need to tell the worker to JUMP
+    if (isPlaying) {
+       // Only jump the worker if it's a significant shift (not just the next frame)
+       // This protects against the 'Seek Storm' while allowing clicks.
+       const lastRenderedTime = lastSeekTimeRef.current; // reusing this ref for convenience
+       if (Math.abs(targetTime - lastRenderedTime) > 200) {
+          engine.play(targetTime, fps);
+          lastSeekTimeRef.current = targetTime;
+       }
+       return;
+    }
 
     const now = performance.now();
     const timeSinceLastSeek = now - lastSeekTimeRef.current;
-    const targetTime = Number(currentTime);
 
     if (timeSinceLastSeek > 32) {
       engine.seek(targetTime);
@@ -148,6 +166,7 @@ export default function Canvas({ projectName }: CanvasProps) {
       if (seekThrottleIdRef.current) clearTimeout(seekThrottleIdRef.current);
     };
   }, [currentTime, isPlaying]);
+
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden min-h-0 relative" style={{ background: '#0f0f0f' }}>

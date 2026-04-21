@@ -49,9 +49,9 @@ class EngineService {
         telemetry.recordFrameReady(payload.seekId || payload.timeMs);
         telemetry.recordBufferCount(this.frameBuffer.getStats().count);
 
-        // During playback, render every frame. During scrubbing, only render the target.
-        const shouldRender = this.isPlaybackActive || payload.isTarget;
-        if (shouldRender && this.onFrameCallback) {
+        // During scrubbing, we still want to push the target frame immediately.
+        // During playback, the UI loop will 'pull' the frame instead of us pushing it.
+        if (!this.isPlaybackActive && payload.isTarget && this.onFrameCallback) {
           const pixels = this.frameBuffer.getFrameAt(payload.timeMs);
           if (pixels) {
             this.onFrameCallback(pixels);
@@ -132,6 +132,18 @@ class EngineService {
    */
   public onFrame(callback: (bitmap: ImageBitmap | Uint8ClampedArray) => void) {
     this.onFrameCallback = callback;
+  }
+
+  /**
+   * UI: Manually request a frame from the buffer for a specific time.
+   * Used for the pull-based playback loop to ensure perfect sync.
+   */
+  public requestFrame(timeMs: number) {
+    if (!this.frameBuffer || !this.onFrameCallback) return;
+    const pixels = this.frameBuffer.getFrameAt(timeMs);
+    if (pixels) {
+      this.onFrameCallback(pixels);
+    }
   }
 
   // Placeholder methods for UI compatibility during transition
