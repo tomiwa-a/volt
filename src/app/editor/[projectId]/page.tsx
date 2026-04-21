@@ -17,8 +17,8 @@ export default function EditorPage() {
   const params = useParams();
   const projectId = params.projectId as string;
   
-  const { name: projectName, loadProject } = useProjectStore();
-  const { isSidebarOpen } = useEditorStore();
+  const { name: projectName, loadProject, clearProject } = useProjectStore();
+  const { isSidebarOpen, reset: resetEditor } = useEditorStore();
 
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -27,7 +27,17 @@ export default function EditorPage() {
     if (projectId) {
       loadProject(projectId).finally(() => setIsLoading(false));
     }
-  }, [projectId, loadProject]);
+
+    // Cleanup: Reset everything when leaving the project
+    return () => {
+      console.log(`[Editor] Leaving project ${projectId}. Cleaning up...`);
+      import('@/lib/engine/EngineService').then(({ engine }) => {
+        engine.terminate();
+      });
+      clearProject();
+      resetEditor();
+    };
+  }, [projectId, loadProject, clearProject, resetEditor]);
 
   if (isLoading) {
     return (

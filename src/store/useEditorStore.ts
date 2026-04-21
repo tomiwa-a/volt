@@ -31,6 +31,7 @@ interface EditorState {
   setShowStats: (show: boolean) => void;
   setIsTimelineCollapsed: (collapsed: boolean) => void;
   setIsSidebarOpen: (open: boolean) => void;
+  reset: () => void;
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -68,4 +69,14 @@ export const useEditorStore = create<EditorState>((set) => ({
   setShowStats: (showStats) => set({ showStats }),
   setIsTimelineCollapsed: (isTimelineCollapsed) => set({ isTimelineCollapsed }),
   setIsSidebarOpen: (isSidebarOpen) => set({ isSidebarOpen }),
+  
+  reset: () => set({
+    isPlaying: false,
+    currentTime: ms(0),
+    currentFrame: 0,
+    zoomLevel: 100,
+    selectedClipId: null,
+    isExporting: false,
+    showStats: false,
+  }),
 }));

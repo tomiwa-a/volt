@@ -30,33 +30,44 @@ class EngineService {
 
   private constructor() {
     if (typeof window !== 'undefined') {
-      this.frameBuffer = new FrameBufferManager();
+      this.initWorker();
+    }
+  }
 
-      // Log hardware profile for reference (multi-worker pool coming in next phase)
-      this.worker = new Worker(new URL('./VideoDecoderWorker.ts', import.meta.url), { type: 'module' });
-      
-      this.worker.onmessage = (e) => {
-        const { type, payload } = e.data;
-        if (type === 'FRAME' && this.onFrameCallback) {
-          telemetry.recordFrameReady(payload.seekId || payload.timeMs);
-          this.onFrameCallback(payload.bitmap);
-        }
-        if (type === 'BUFFER_READY' && this.frameBuffer) {
-          // Record telemetry for EVERY frame (keeps monitor alive and accurate)
-          telemetry.recordFrameReady(payload.seekId || payload.timeMs);
-          telemetry.recordBufferCount(this.frameBuffer.getStats().count);
+  private initWorker() {
+    if (typeof window === 'undefined') return;
+    this.worker = new Worker(new URL('./VideoDecoderWorker.ts', import.meta.url), { type: 'module' });
+    
+    this.worker.onmessage = (e) => {
+      const { type, payload } = e.data;
+      if (type === 'FRAME' && this.onFrameCallback) {
+        telemetry.recordFrameReady(payload.seekId || payload.timeMs);
+        this.onFrameCallback(payload.bitmap);
+      }
+      if (type === 'BUFFER_READY' && this.frameBuffer) {
+        // Record telemetry for EVERY frame (keeps monitor alive and accurate)
+        telemetry.recordFrameReady(payload.seekId || payload.timeMs);
+        telemetry.recordBufferCount(this.frameBuffer.getStats().count);
 
-          // During playback, render every frame. During scrubbing, only render the target.
-          const shouldRender = this.isPlaybackActive || payload.isTarget;
-          if (shouldRender && this.onFrameCallback) {
-            const pixels = this.frameBuffer.getFrameAt(payload.timeMs);
-            if (pixels) {
-              this.onFrameCallback(pixels);
-            }
+        // During playback, render every frame. During scrubbing, only render the target.
+        const shouldRender = this.isPlaybackActive || payload.isTarget;
+        if (shouldRender && this.onFrameCallback) {
+          const pixels = this.frameBuffer.getFrameAt(payload.timeMs);
+          if (pixels) {
+            this.onFrameCallback(pixels);
           }
         }
-      };
+      }
+    };
+  }
+
+  public terminate() {
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
     }
+    this.isPlaybackActive = false;
+    this.frameBuffer?.clear();
   }
 
   public static getInstance(): EngineService {
@@ -74,9 +85,8 @@ class EngineService {
     if (key === this.activeFileKey) return;
     this.activeFileKey = key;
 
-    // Reset everything for the new file to prevent stale metrics/latencies
-    this.frameBuffer?.clear();
-    this.lastSeekId = 0;
+    if (!this.frameBuffer) this.frameBuffer = new FrameBufferManager();
+    if (!this.worker) this.initWorker();
 
     this.worker?.postMessage({ 
       type: 'INIT', 
