@@ -1,9 +1,9 @@
 /// <reference lib="webworker" />
 
-import { FrameBufferManager } from './FrameBuffer';
-import MP4Box from 'mp4box';
+import { FrameBufferManager } from "./FrameBuffer";
+import MP4Box from "mp4box";
 
-type Milliseconds = number & { readonly __brand: 'ms' };
+type Milliseconds = number & { readonly __brand: "ms" };
 
 const ctx: Worker = self as any;
 
@@ -33,46 +33,63 @@ ctx.onmessage = async (e) => {
   const { type, payload } = e.data;
 
   switch (type) {
-    case 'INIT':
-      console.log(`[DecoderWorker] INIT received for file: ${payload.file.name}`);
+    case "INIT":
+      console.log(
+        `[DecoderWorker] INIT received for file: ${payload.file.name}`,
+      );
       activeLoadId++;
       currentSeekId = 0;
       lastDecodedIndex = -1;
       playbackActive = false;
-      if (playbackIntervalId) { clearInterval(playbackIntervalId); playbackIntervalId = null; }
+      if (playbackIntervalId) {
+        clearInterval(playbackIntervalId);
+        playbackIntervalId = null;
+      }
       if (payload.sharedBuffer) {
         frameBuffer = new FrameBufferManager(payload.sharedBuffer);
       }
       await initFile(payload.file, activeLoadId);
       break;
 
-    case 'SEEK':
+    case "SEEK":
       // Scrubbing: stop any active playback first
       if (playbackActive) {
         playbackActive = false;
-        if (playbackIntervalId) { clearInterval(playbackIntervalId); playbackIntervalId = null; }
+        if (playbackIntervalId) {
+          clearInterval(playbackIntervalId);
+          playbackIntervalId = null;
+        }
       }
       seekTo(payload.time as Milliseconds, payload.seekId);
       break;
 
-    case 'PLAY':
+    case "PLAY":
       startPlayback(payload.time as Milliseconds, payload.fps);
       break;
 
-    case 'STOP':
+    case "STOP":
       playbackActive = false;
-      if (playbackIntervalId) { clearInterval(playbackIntervalId); playbackIntervalId = null; }
+      if (playbackIntervalId) {
+        clearInterval(playbackIntervalId);
+        playbackIntervalId = null;
+      }
       break;
 
     default:
-      console.warn('[DecoderWorker] Unknown message type:', type);
+      console.warn("[DecoderWorker] Unknown message type:", type);
   }
 };
 
-function startPlayback(startTimeMs: Milliseconds, fps: number) {
+async function startPlayback(startTimeMs: Milliseconds, fps: number) {
   if (!videoTrack || samples.length === 0) return;
 
-  playbackActive = true;
+  // Kill any existing loop BEFORE we start the new preparation
+  if (playbackIntervalId) {
+    clearInterval(playbackIntervalId);
+    playbackIntervalId = null;
+  }
+  playbackActive = false;
+
   const timescale = videoTrack.timescale;
   const startCts = (startTimeMs / 1000) * timescale;
 
@@ -83,22 +100,38 @@ function startPlayback(startTimeMs: Milliseconds, fps: number) {
     playbackCurrentIndex = i;
   }
 
-  // Do an initial seek to prime the decoder from the nearest keyframe
-  seekTo(startTimeMs);
+  // CRITICAL: Await the decoder configuration before starting the playback loop
+  await seekTo(startTimeMs);
 
-  const intervalMs = 1000 / fps;
+  playbackActive = true;
+  const intervalMs = Math.max(4, 1000 / fps);
 
-  if (playbackIntervalId) clearInterval(playbackIntervalId);
   playbackIntervalId = setInterval(() => {
-    if (!playbackActive || !decoder) {
-      clearInterval(playbackIntervalId);
-      playbackIntervalId = null;
+    if (!playbackActive || !decoder || decoder.state !== "configured") {
+      if (!playbackActive) {
+        clearInterval(playbackIntervalId);
+        playbackIntervalId = null;
+      }
+      return;
+    }
+
+    // Keep a bounded look-ahead window.
+    const stats = frameBuffer ? frameBuffer.getStats() : { count: 0 };
+    if (stats.count >= 110) return; // Buffer is full, wait.
+
+    // Use time-domain gating (not sample-index gating) to avoid drift on VFR/irregular cadence media.
+    const playheadTimeMs = frameBuffer ? frameBuffer.getPlayheadTime() : 0;
+    const decodedTimeMs =
+      (samples[playbackCurrentIndex].cts * 1000) / timescale;
+
+    // Keep at most ~4s decoded ahead of UI playhead.
+    if (decodedTimeMs > playheadTimeMs + 4000) {
       return;
     }
 
     playbackCurrentIndex++;
     if (playbackCurrentIndex >= samples.length) {
-      // Reached end of video
+      // Reached physical end of stream
       playbackActive = false;
       clearInterval(playbackIntervalId);
       playbackIntervalId = null;
@@ -107,24 +140,23 @@ function startPlayback(startTimeMs: Milliseconds, fps: number) {
 
     const s = samples[playbackCurrentIndex];
 
-    // Feed exactly ONE frame to the decoder per tick
     try {
-      decoder?.decode(new EncodedVideoChunk({
-        type: s.is_sync ? 'key' : 'delta',
-        timestamp: s.cts * (1000000 / timescale),
-        duration: s.duration * (1000000 / timescale),
-        data: s.data
-      }));
-      lastDecodedIndex = playbackCurrentIndex;
-
-      // Update the seek target so the output callback knows what's "current"
-      seekTargetTimestamp = Math.round(s.cts * (1000000 / timescale));
+      if (decoder.state === "configured") {
+        decoder.decode(
+          new EncodedVideoChunk({
+            type: s.is_sync ? "key" : "delta",
+            timestamp: s.cts * (1000000 / timescale),
+            duration: s.duration * (1000000 / timescale),
+            data: s.data,
+          }),
+        );
+        lastDecodedIndex = playbackCurrentIndex;
+      }
     } catch (err) {
-      console.error('[DecoderWorker] Playback decode error:', err);
+      console.error("[DecoderWorker] Playback decode error:", err);
     }
   }, intervalMs);
 }
-
 
 async function initFile(file: File, loadId: number) {
   samples = [];
@@ -139,21 +171,28 @@ async function initFile(file: File, loadId: number) {
   mp4boxFile = MP4Box.createFile();
 
   mp4boxFile.onReady = (info: any) => {
-    console.log(`[DecoderWorker] MP4Box onReady triggered. Tracks: ${info.videoTracks.length}`);
+    console.log(
+      `[DecoderWorker] MP4Box onReady triggered. Tracks: ${info.videoTracks.length}`,
+    );
     videoTrack = info.videoTracks[0];
     if (!videoTrack) {
-      console.error('[DecoderWorker] No video track found in file.');
+      console.error("[DecoderWorker] No video track found in file.");
       return;
     }
-    
+
     // Update dimensions in the SharedArrayBuffer header
     if (frameBuffer) {
-      frameBuffer.setDimensions(videoTrack.video.width, videoTrack.video.height);
+      frameBuffer.setDimensions(
+        videoTrack.video.width,
+        videoTrack.video.height,
+      );
     }
 
-    ctx.postMessage({ type: 'READY', payload: { track: videoTrack } });
+    ctx.postMessage({ type: "READY", payload: { track: videoTrack } });
     mp4boxFile.setExtractionOptions(videoTrack.id, null, { nbSamples: 1000 });
-    console.log(`[DecoderWorker] Starting extraction for track ${videoTrack.id}`);
+    console.log(
+      `[DecoderWorker] Starting extraction for track ${videoTrack.id}`,
+    );
     mp4boxFile.start();
   };
 
@@ -161,7 +200,7 @@ async function initFile(file: File, loadId: number) {
     for (let i = 0; i < fetchedSamples.length; i++) {
       samples.push(fetchedSamples[i]);
     }
-    ctx.postMessage({ type: 'INDEXED', payload: { count: samples.length } });
+    ctx.postMessage({ type: "INDEXED", payload: { count: samples.length } });
 
     if (pendingSeekMs !== null) {
       const t = pendingSeekMs;
@@ -171,10 +210,10 @@ async function initFile(file: File, loadId: number) {
   };
 
   mp4boxFile.onError = (e: any) => {
-    console.error('[DecoderWorker] MP4Box Error:', e);
+    console.error("[DecoderWorker] MP4Box Error:", e);
   };
 
-  console.log('[DecoderWorker] Starting file stream read loop...');
+  console.log("[DecoderWorker] Starting file stream read loop...");
   const reader = file.stream().getReader();
   let offset = 0;
   while (true) {
@@ -186,12 +225,15 @@ async function initFile(file: File, loadId: number) {
     if (done) break;
 
     try {
-      const chunk = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
+      const chunk = value.buffer.slice(
+        value.byteOffset,
+        value.byteOffset + value.byteLength,
+      );
       (chunk as any).fileStart = offset;
       mp4boxFile.appendBuffer(chunk);
       offset += value.byteLength;
     } catch (err) {
-      console.error('[DecoderWorker] Append error:', err);
+      console.error("[DecoderWorker] Append error:", err);
       break;
     }
   }
@@ -216,13 +258,15 @@ async function seekTo(timeMs: Milliseconds, requestSeekId?: number) {
     targetIndex = i;
   }
 
-  seekTargetTimestamp = Math.round(samples[targetIndex].cts * (1000000 / timescale));
+  seekTargetTimestamp = Math.round(
+    samples[targetIndex].cts * (1000000 / timescale),
+  );
 
   let keyIndex = targetIndex;
   while (keyIndex > 0 && !samples[keyIndex].is_sync) {
     keyIndex--;
   }
-  
+
   if (seekId !== currentSeekId) return;
 
   ensureDecoder();
@@ -241,20 +285,32 @@ async function seekTo(timeMs: Milliseconds, requestSeekId?: number) {
   }
 
   if (!isSequentialPlayback) {
-    console.log(`[Volt] HARD RESET Triggered. Drift: ${drift}, Target: ${targetIndex}, Last: ${lastDecodedIndex}`);
+    console.log(
+      `[Volt] HARD RESET Triggered. Drift: ${drift}, Target: ${targetIndex}, Last: ${lastDecodedIndex}`,
+    );
     try {
-      decoder?.reset();
-      configureDecoder();
+      if (decoder && decoder.state !== "closed") {
+        decoder.reset();
+        configureDecoder();
+      } else {
+        ensureDecoder();
+      }
     } catch (e) {
-      console.error(`[DecoderWorker] [${seekId}] Decoder reset/reconfig failed:`, e);
-      decoder?.close();
+      console.error(
+        `[DecoderWorker] [${seekId}] Decoder reset/reconfig failed:`,
+        e,
+      );
+      if (decoder && decoder.state !== "closed") {
+        try {
+          decoder.close();
+        } catch {}
+      }
       decoder = null;
       ensureDecoder();
     }
     // Set our baseline to start decoding from the keyframe
     lastDecodedIndex = keyIndex - 1;
   }
-
 
   seekFrameTotal = Math.max(0, targetIndex - lastDecodedIndex);
   seekFrameDecoded = 0;
@@ -267,39 +323,63 @@ async function seekTo(timeMs: Milliseconds, requestSeekId?: number) {
       // In sequential mode, we DON'T break just because a new seekId arrived.
       // This prevents "starvation" where the decoder never catches up.
       if (!isSequentialPlayback && seekId !== currentSeekId) break;
-      
+
       const s = samples[i];
-      decoder?.decode(new EncodedVideoChunk({
-        type: s.is_sync ? 'key' : 'delta',
-        timestamp: s.cts * (1000000 / timescale),
-        duration: s.duration * (1000000 / timescale),
-        data: s.data
-      }));
-      lastDecodedIndex = i;
+      try {
+        if (decoder && decoder.state === "configured") {
+          decoder.decode(
+            new EncodedVideoChunk({
+              type: s.is_sync ? "key" : "delta",
+              timestamp: s.cts * (1000000 / timescale),
+              duration: s.duration * (1000000 / timescale),
+              data: s.data,
+            }),
+          );
+          lastDecodedIndex = i;
+        }
+      } catch (err) {
+        console.warn(
+          "[DecoderWorker] Seek decode suppressed (likely closed):",
+          err,
+        );
+      }
     }
   }
 
   // Keep a buffer full to naturally push out the target frame without needing to flush()
-  const prebufferCount = 30;
-  for (let i = targetIndex + 1; i < Math.min(samples.length, targetIndex + 1 + prebufferCount); i++) {
+  // Doubled to 60 for better high-res stability.
+  const prebufferCount = 60;
+  for (
+    let i = targetIndex + 1;
+    i < Math.min(samples.length, targetIndex + 1 + prebufferCount);
+    i++
+  ) {
     // Again, don't interrupt the pre-buffer fill during sequential playback.
     if (!isSequentialPlayback && seekId !== currentSeekId) break;
-    
+
     // Only feed the prebuffer if we haven't already!
     if (i > lastDecodedIndex) {
       const s = samples[i];
-      decoder?.decode(new EncodedVideoChunk({
-        type: s.is_sync ? 'key' : 'delta',
-        timestamp: s.cts * (1000000 / timescale),
-        duration: s.duration * (1000000 / timescale),
-        data: s.data
-      }));
-      lastDecodedIndex = i;
+      try {
+        if (decoder && decoder.state === "configured") {
+          decoder.decode(
+            new EncodedVideoChunk({
+              type: s.is_sync ? "key" : "delta",
+              timestamp: s.cts * (1000000 / timescale),
+              duration: s.duration * (1000000 / timescale),
+              data: s.data,
+            }),
+          );
+          lastDecodedIndex = i;
+        }
+      } catch (err) {
+        console.warn("[DecoderWorker] Pre-buffer decode suppressed:", err);
+      }
     }
   }
 
   // We DO NOT call decoder?.flush() here!
-  // flush() places the decoder into an End-Of-Stream state which strictly requires the NEXT frame 
+  // flush() places the decoder into an End-Of-Stream state which strictly requires the NEXT frame
   // to be a key-frame. If we flush, we cannot feed sequential delta frames on the next tick!
   // The 30-frame prebuffer loop above is plenty to push out the target frame.
 }
@@ -311,10 +391,14 @@ function ensureDecoder() {
     output: (frame) => {
       const timestampMs = Math.round(frame.timestamp / 1000);
       const targetMs = Math.round(seekTargetTimestamp / 1000);
-      
+
       // During continuous playback, NEVER discard frames.
       // During scrubbing, only discard frames that are before the seek target.
-      if (!playbackActive && !isSequentialPlayback && timestampMs < targetMs - 10) {
+      if (
+        !playbackActive &&
+        !isSequentialPlayback &&
+        timestampMs < targetMs - 10
+      ) {
         frame.close();
         return;
       }
@@ -322,11 +406,14 @@ function ensureDecoder() {
       // During continuous playback, every frame is a "target" frame.
       let isTarget = playbackActive;
       if (!isTarget && lastFoundTargetSeekId !== currentSeekId) {
-          isTarget = true;
-          lastFoundTargetSeekId = currentSeekId;
+        isTarget = true;
+        lastFoundTargetSeekId = currentSeekId;
       }
 
-      const requiredSize = timestampMs === targetMs ? 0 : (frame.displayWidth * frame.displayHeight * 4);
+      const requiredSize =
+        timestampMs === targetMs
+          ? 0
+          : frame.displayWidth * frame.displayHeight * 4;
       const canFitInBuffer = requiredSize <= FrameBufferManager.FIXED_STRIDE;
 
       if (frameBuffer && canFitInBuffer) {
@@ -335,13 +422,24 @@ function ensureDecoder() {
           const pixels = frameBuffer.getWriteBuffer(writeIndex);
           if (pixels) {
             const frameTimeMs = (frame.timestamp / 1000) as Milliseconds;
-            frame.copyTo(pixels, { format: 'RGBA' }).then(() => {
-              frameBuffer?.commitWrite(writeIndex, frameTimeMs);
-              ctx.postMessage({ type: 'BUFFER_READY', payload: { timeMs: frameTimeMs, index: writeIndex, seekId: currentSeekId, isTarget } });
-              frame.close();
-            }).catch(() => {
-              frame.close();
-            });
+            frame
+              .copyTo(pixels, { format: "RGBA" })
+              .then(() => {
+                frameBuffer?.commitWrite(writeIndex, frameTimeMs);
+                ctx.postMessage({
+                  type: "BUFFER_READY",
+                  payload: {
+                    timeMs: frameTimeMs,
+                    index: writeIndex,
+                    seekId: currentSeekId,
+                    isTarget,
+                  },
+                });
+                frame.close();
+              })
+              .catch(() => {
+                frame.close();
+              });
             return;
           }
         }
@@ -349,15 +447,29 @@ function ensureDecoder() {
 
       // Fallback for overflow (4K) or if buffer is full: Use ImageBitmap (Slower but avoids corruption)
       if (isTarget) {
-        createImageBitmap(frame).then(bitmap => {
-          ctx.postMessage({ type: 'FRAME', payload: { bitmap, timeMs: (frame.timestamp / 1000), seekId: currentSeekId } }, [bitmap]);
+        createImageBitmap(frame).then((bitmap) => {
+          ctx.postMessage(
+            {
+              type: "FRAME",
+              payload: {
+                bitmap,
+                timeMs: frame.timestamp / 1000,
+                seekId: currentSeekId,
+              },
+            },
+            [bitmap],
+          );
           frame.close();
         });
       } else {
         frame.close();
       }
     },
-    error: (e) => console.error(`[DecoderWorker] [${currentSeekId}] Global Decode error:`, e)
+    error: (e) =>
+      console.error(
+        `[DecoderWorker] [${currentSeekId}] Global Decode error:`,
+        e,
+      ),
   });
 
   configureDecoder();
@@ -369,7 +481,7 @@ function configureDecoder() {
     codec: videoTrack.codec,
     codedWidth: videoTrack.video.width,
     codedHeight: videoTrack.video.height,
-    description: getExtraData(mp4boxFile)
+    description: getExtraData(mp4boxFile),
   });
 }
 
@@ -383,7 +495,11 @@ function getExtraData(file: any) {
   for (const entry of track.mdia.minf.stbl.stsd.entries) {
     if (entry.avcC || entry.hvcC || entry.vpcC) {
       const box = entry.avcC || entry.hvcC || entry.vpcC;
-      const stream = new (MP4Box as any).DataStream(undefined, 0, (MP4Box as any).DataStream.BIG_ENDIAN);
+      const stream = new (MP4Box as any).DataStream(
+        undefined,
+        0,
+        (MP4Box as any).DataStream.BIG_ENDIAN,
+      );
       box.write(stream);
       cachedExtraData = new Uint8Array(stream.buffer, 8); // Skip box header
       return cachedExtraData;

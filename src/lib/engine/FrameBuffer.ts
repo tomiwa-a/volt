@@ -1,4 +1,4 @@
-import { Milliseconds } from '@/types/units';
+import { Milliseconds } from "@/types/units";
 
 /**
  * Memory layout for the SharedArrayBuffer:
@@ -6,7 +6,7 @@ import { Milliseconds } from '@/types/units';
  * [128...] Frame Data Slots
  */
 export const HEADER_SIZE = 1024;
-export const MAX_FRAMES = 60; // cushion for 60fps
+export const MAX_FRAMES = 120; // 4 second cushion at 30fps
 
 export interface FrameMetadata {
   timeMs: number;
@@ -19,13 +19,14 @@ export class FrameBufferManager {
   private header: Int32Array;
   private metadata: Float64Array;
   private frameData: Uint8ClampedArray;
-  
+
   // Indices for header fields
-  private static HEAD = 0;      // Worker: Absolute index of next write
-  private static TAIL = 1;      // UI: Absolute index of next read
-  private static WIDTH = 2;     // Frame width
-  private static HEIGHT = 3;    // Frame height
-  private static CAPACITY = 4;  // Max frames
+  private static HEAD = 0; // Worker: Absolute index of next write
+  private static TAIL = 1; // UI: Absolute index of next read
+  private static WIDTH = 2; // Frame width
+  private static HEIGHT = 3; // Frame height
+  private static CAPACITY = 4; // Max frames
+  private static PLAYHEAD_TIME = 5; // UI: Current playback position (ms)
 
   constructor(buffer?: SharedArrayBuffer) {
     if (buffer) {
@@ -33,7 +34,7 @@ export class FrameBufferManager {
     } else {
       // Allocate fresh for a standard 1080p stream
       const frameSize = 1920 * 1080 * 4;
-      const totalSize = HEADER_SIZE + (frameSize * MAX_FRAMES);
+      const totalSize = HEADER_SIZE + frameSize * MAX_FRAMES;
       this.buffer = new SharedArrayBuffer(totalSize);
     }
 
@@ -67,7 +68,7 @@ export class FrameBufferManager {
 
     // Atomically increment the HEAD for this worker's reservation
     const absoluteIndex = Atomics.add(this.header, FrameBufferManager.HEAD, 1);
-    
+
     // Double check we didn't overshoot
     if (absoluteIndex - tail >= capacity) {
       return null;
@@ -85,7 +86,10 @@ export class FrameBufferManager {
   public getWriteBuffer(absoluteIndex: number): Uint8ClampedArray {
     const capacity = Atomics.load(this.header, FrameBufferManager.CAPACITY);
     const start = (absoluteIndex % capacity) * FrameBufferManager.FIXED_STRIDE;
-    return this.frameData.subarray(start, start + FrameBufferManager.FIXED_STRIDE);
+    return this.frameData.subarray(
+      start,
+      start + FrameBufferManager.FIXED_STRIDE,
+    );
   }
 
   /**
@@ -110,26 +114,32 @@ export class FrameBufferManager {
     let minDiff = Infinity;
 
     for (let i = tail; i < head; i++) {
-        const frameTime = this.metadata[i % capacity];
-        if (frameTime === -1) continue; // Not copied into memory yet
-        
-        const diff = Math.abs(frameTime - timeMs);
-        if (diff < minDiff) {
-            minDiff = diff;
-            bestIndex = i;
-        }
+      const frameTime = this.metadata[i % capacity];
+      if (frameTime === -1) continue; // Not copied into memory yet
+
+      const diff = Math.abs(frameTime - timeMs);
+      if (diff < minDiff) {
+        minDiff = diff;
+        bestIndex = i;
+      }
     }
 
     if (bestIndex !== -1) {
-      // Auto-advance TAIL to free up space behind the playhead.
-      // Leave a 5-frame trailing buffer for instant backward scrubbing.
-      const newTail = Math.max(tail, bestIndex - 5);
-      Atomics.store(this.header, FrameBufferManager.TAIL, newTail);
+      // Keep TAIL monotonic so head-tail remains a valid fill count.
+      // Rewinding tail can inflate buffer fill and stall producer writes.
+      const bufferFill = head - tail;
+      if (bufferFill > capacity - 10) {
+        const newTail = Math.max(tail, bestIndex - 10);
+        Atomics.store(this.header, FrameBufferManager.TAIL, newTail);
+      }
 
       const start = (bestIndex % capacity) * FrameBufferManager.FIXED_STRIDE;
-      return this.frameData.subarray(start, start + FrameBufferManager.FIXED_STRIDE);
+      return this.frameData.subarray(
+        start,
+        start + FrameBufferManager.FIXED_STRIDE,
+      );
     }
-    
+
     return null;
   }
 
@@ -150,6 +160,17 @@ export class FrameBufferManager {
     this.metadata.fill(0);
   }
 
+  public getStats() {
+    const head = Atomics.load(this.header, FrameBufferManager.HEAD);
+    const tail = Atomics.load(this.header, FrameBufferManager.TAIL);
+    return {
+      count: Math.max(0, head - tail),
+      capacity: Atomics.load(this.header, FrameBufferManager.CAPACITY),
+      width: Atomics.load(this.header, FrameBufferManager.WIDTH),
+      height: Atomics.load(this.header, FrameBufferManager.HEIGHT),
+    };
+  }
+
   /**
    * Worker: Update the resolution in the header.
    */
@@ -168,14 +189,21 @@ export class FrameBufferManager {
     };
   }
 
-  public getStats() {
-    const head = Atomics.load(this.header, FrameBufferManager.HEAD);
-    const tail = Atomics.load(this.header, FrameBufferManager.TAIL);
-    return {
-      count: Math.max(0, head - tail),
-      capacity: Atomics.load(this.header, FrameBufferManager.CAPACITY),
-      width: Atomics.load(this.header, FrameBufferManager.WIDTH),
-      height: Atomics.load(this.header, FrameBufferManager.HEIGHT),
-    };
+  /**
+   * UI: Update the current playhead time for the worker.
+   */
+  public setPlayheadTime(timeMs: number) {
+    Atomics.store(
+      this.header,
+      FrameBufferManager.PLAYHEAD_TIME,
+      Math.round(timeMs),
+    );
+  }
+
+  /**
+   * Worker: Get the current playhead time.
+   */
+  public getPlayheadTime(): number {
+    return Atomics.load(this.header, FrameBufferManager.PLAYHEAD_TIME);
   }
 }

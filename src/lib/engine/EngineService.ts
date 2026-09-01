@@ -134,12 +134,12 @@ class EngineService {
     this.onFrameCallback = callback;
   }
 
-  /**
-   * UI: Manually request a frame from the buffer for a specific time.
-   * Used for the pull-based playback loop to ensure perfect sync.
-   */
   public requestFrame(timeMs: number) {
     if (!this.frameBuffer || !this.onFrameCallback) return;
+    
+    // Write current time to shared memory so worker can track us instantly
+    this.frameBuffer.setPlayheadTime(timeMs);
+
     const pixels = this.frameBuffer.getFrameAt(timeMs);
     if (pixels) {
       this.onFrameCallback(pixels);
